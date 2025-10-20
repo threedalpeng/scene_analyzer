@@ -6,7 +6,7 @@ from typing import Iterable
 
 from google import genai
 
-from inter_scene_analyze import build_bags, run_s3_batch, validate_llm_decision
+from inter_scene_analyze import DyadBag, build_bags, run_s3_batch, validate_llm_decision
 from intra_scene_analyze import run_s1_batch, s1_flatten_validate
 from merge_entity import alias_name, alias_pair, build_alias_map, run_s2_alias
 from schema import ActClue, AliasGroups, DyadFinal, ToMClue
@@ -173,7 +173,9 @@ def append_s3_cache(
         f.write("\n")
 
 
-def load_cached_s1(out_dir: Path) -> tuple[list[ToMClue], list[ActClue], list[str]] | None:
+def load_cached_s1(
+    out_dir: Path,
+) -> tuple[list[ToMClue], list[ActClue], list[str]] | None:
     path = out_dir / "signals_s1.jsonl"
     if not path.exists():
         return None
@@ -319,9 +321,7 @@ def run_pipeline(input_path: Path, out_dir: Path, batch_chunk: int = 10) -> None
         if not bag:
             continue
         for a in bag.acts_rep:
-            event_role_map[a.id] = (
-                "turning" if a.id in cached_turns else "supporting"
-            )
+            event_role_map[a.id] = "turning" if a.id in cached_turns else "supporting"
         for t in bag.toms:
             event_role_map[t.id] = "supporting"
 
@@ -329,9 +329,7 @@ def run_pipeline(input_path: Path, out_dir: Path, batch_chunk: int = 10) -> None
     for idx, (pair, bag) in enumerate(sorted(bags.items()), start=1):
         cached = cache_data.get(pair)
         if cached:
-            log_status(
-                f"S3 {idx}/{total_pairs}: {pair[0]} <-> {pair[1]} (cached)"
-            )
+            log_status(f"S3 {idx}/{total_pairs}: {pair[0]} <-> {pair[1]} (cached)")
             continue
         log_status(f"S3 {idx}/{total_pairs}: {pair[0]} <-> {pair[1]} queued")
         pending.append((idx, pair, bag))

@@ -1,8 +1,8 @@
 import json
-from datetime import datetime
 from collections.abc import Iterable
+from datetime import datetime
 from pathlib import Path
-from typing import Any, TypeVar, Type
+from typing import Any, Type, TypeVar
 
 from pydantic import BaseModel
 

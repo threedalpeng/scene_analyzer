@@ -150,7 +150,7 @@ def llm_adjudicate_pair(client: genai.Client, bag: DyadBag) -> LLMAdjudication:
 
 
 def build_s3_inline_requests(
-    items: list[tuple[tuple[str, str], DyadBag]]
+    items: list[tuple[tuple[str, str], DyadBag]],
 ) -> tuple[list[types.InlinedRequestDict], list[tuple[str, str]]]:
     requests: list[types.InlinedRequestDict] = []
     order: list[tuple[str, str]] = []
@@ -162,11 +162,7 @@ def build_s3_inline_requests(
                     {
                         "role": "user",
                         "parts": [
-                            {
-                                "text": s3_user_payload(
-                                    dossier, toms, causal, stats
-                                )
-                            }
+                            {"text": s3_user_payload(dossier, toms, causal, stats)}
                         ],
                     }
                 ],
