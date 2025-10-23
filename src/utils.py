@@ -6,8 +6,6 @@ from typing import Any, Type, TypeVar
 
 from pydantic import BaseModel
 
-from schema import ActClue
-
 
 def ensure_dir(p: Path) -> None:
     p.mkdir(parents=True, exist_ok=True)
@@ -31,19 +29,6 @@ def jsonl_write(path: Path, rows: Iterable[dict]) -> None:
 def norm_pair(a: str, b: str) -> tuple[str, str]:
     a, b = sorted((a, b))
     return a, b
-
-
-STAKE_RANK = {"major": 3, "moderate": 2, "minor": 1}
-SALIENCE_RANK = {"high": 3, "medium": 2, "low": 1}
-DUR_RANK = {"persistent": 3, "temporary": 2, "momentary": 1}
-
-
-def act_score(a: ActClue) -> int:
-    return (
-        100 * STAKE_RANK.get(a.axes.stakes, 0)
-        + 10 * SALIENCE_RANK.get(a.axes.salience, 0)
-        + DUR_RANK.get(a.axes.durability, 0)
-    )
 
 
 T = TypeVar("T", bound=BaseModel)

@@ -2,27 +2,54 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-ToMKind = Literal["BelievesAbout", "FeelsTowards", "IntendsTo", "DesiresFor"]
-StanceCore = Literal["cooperation", "hostility"]
-Stance = Literal["cooperation", "hostility", "mixed", "neutral"]
+Valence = Literal["positive", "negative", "neutral", "mixed"]
 Durability = Literal["momentary", "temporary", "persistent"]
+Salience = Literal["low", "medium", "high"]
+Stakes = Literal["minor", "moderate", "major"]
+Volition = Literal["voluntary", "coerced", "accidental"]
+GoalAlignment = Literal["aligned", "orthogonal", "opposed"]
+TurningCategory = Literal["Reversal", "Strengthening", "Commitment", "Dissolution"]
 
 
-class Axes(BaseModel):
-    salience: Literal["low", "medium", "high"]
-    stakes: Literal["minor", "moderate", "major"]
-    durability: Durability
-    volition: Literal["voluntary", "coerced", "accidental"]
-    goal_alignment: Literal["aligned", "orthogonal", "opposed"]
-    consequence_refs: list[int] = Field(default_factory=list)
+class ValidationResult(BaseModel):
+    passed: bool
+    level: Literal["structural", "semantic", "coherence"]
+    errors: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+    @classmethod
+    def ok(
+        cls,
+        level: Literal["structural", "semantic", "coherence"] = "structural",
+        warnings: list[str] | None = None,
+    ) -> "ValidationResult":
+        return cls(passed=True, level=level, warnings=warnings or [])
+
+    @classmethod
+    def fail(
+        cls,
+        level: Literal["structural", "semantic", "coherence"],
+        errors: list[str],
+        warnings: list[str] | None = None,
+    ) -> "ValidationResult":
+        return cls(passed=False, level=level, errors=errors, warnings=warnings or [])
 
 
-class BaseClue(BaseModel):
+class BaseSignal(BaseModel):
     id: str
     scene: int
-    pair: tuple[str, str]
-    modality: Literal["tom", "act"]
+    modality: str
     evidence: str
+
+    @field_validator("evidence")
+    @classmethod
+    def _clip_evidence(cls, v: str) -> str:
+        v = v.strip()
+        return v if len(v) <= 200 else v[:200]
+
+
+class PairSignal(BaseSignal):
+    pair: tuple[str, str]
 
     @field_validator("pair")
     @classmethod
@@ -32,98 +59,22 @@ class BaseClue(BaseModel):
         a, b = sorted(v)
         return a, b
 
-    @field_validator("evidence")
-    @classmethod
-    def _clip_evidence(cls, v: str) -> str:
-        v = v.strip()
-        return v if len(v) <= 200 else v[:200]
-
-
-class ToMClue(BaseClue):
-    modality: Literal["tom"] = "tom"
-    kind: ToMKind
-    claim: str
-
-
-class ActClue(BaseClue):
-    modality: Literal["act"] = "act"
-    actors: list[str] = Field(default_factory=list)
-    targets: list[str] = Field(default_factory=list)
-    stance: StanceCore
-    subtype: str
-    axes: Axes
-
-
-class IntraScenePayload(BaseModel):
-    participants: list[str]
-    tom_clues: list[ToMClue] = Field(default_factory=list)
-    act_clues: list[ActClue] = Field(default_factory=list)
-
-
-class BaseClueAPI(BaseModel):
-    id: str
-    scene: int
-    pair: list[str] = Field(min_length=2, max_length=2)
-    modality: Literal["tom", "act"]
-    evidence: str
-
-
-class ToMClueAPI(BaseClueAPI):
-    modality: Literal["tom"] = "tom"
-    kind: ToMKind
-    claim: str
-
-    def to_internal(self) -> ToMClue:
-        data = self.model_dump()
-        data["pair"] = tuple(data["pair"])
-        return ToMClue.model_validate(data)
-
-
-class ActClueAPI(BaseClueAPI):
-    modality: Literal["act"] = "act"
-    actors: list[str] = Field(default_factory=list)
-    targets: list[str] = Field(default_factory=list)
-    stance: StanceCore
-    subtype: str
-    axes: Axes
-
-    def to_internal(self) -> ActClue:
-        data = self.model_dump()
-        data["pair"] = tuple(data["pair"])
-        return ActClue.model_validate(data)
-
-
-class IntraScenePayloadAPI(BaseModel):
-    participants: list[str]
-    tom_clues: list[ToMClueAPI] = Field(default_factory=list)
-    act_clues: list[ActClueAPI] = Field(default_factory=list)
-
-    def to_internal(self) -> IntraScenePayload:
-        return IntraScenePayload(
-            participants=self.participants,
-            tom_clues=[t.to_internal() for t in self.tom_clues],
-            act_clues=[a.to_internal() for a in self.act_clues],
-        )
-
-
-# class WithEventRole(BaseModel):
-#     event_role: Literal["turning", "supporting"]
-
-
-# class ToMClueWithRole(ToMClue, WithEventRole): ...
-
-
-# class ActClueWithRole(ActClue, WithEventRole): ...
-
 
 class RelationState(BaseModel):
-    stance: Stance
+    valence: Valence
     durability: Durability
+    label: str | None = None
+
+
+class FinalRelation(BaseModel):
+    valence: Valence
+    label: str | None = None
 
 
 class TurningEntry(BaseModel):
     scene: int
-    type: str  # betrayal|reconciliation|coerced_hostility|aligned_mission|revealed_identity|implicit_turn
+    category: TurningCategory
+    pattern: str
     summary: str
     quote: str
     representative_act_id: str
@@ -134,8 +85,8 @@ class TurningEntry(BaseModel):
 
 class DyadFinal(BaseModel):
     pair: tuple[str, str]
-    final_relation: Stance
     turning_timeline: list[TurningEntry]
+    final_relation: FinalRelation
     state_timeline_ref: str | None = None
 
 
@@ -148,7 +99,7 @@ class LLMEventRole(BaseModel):
 class LLMAdjudication(BaseModel):
     event_roles: list[LLMEventRole]
     turning_timeline: list[TurningEntry]
-    final_relation: Stance
+    final_relation: FinalRelation
     log: list[str] = Field(default_factory=list)
 
 
