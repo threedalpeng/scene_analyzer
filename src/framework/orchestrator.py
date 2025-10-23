@@ -9,10 +9,10 @@ from framework.aliasing import AliasResolver
 from framework.synthesis import DyadSynthesizer, build_bags
 from framework.temporal import FabulaReconstructor
 from framework.validation import ValidationContext, ValidationPipeline
-from schema import BaseSignal
+from schema import BaseClue
 
 
-ActTransform = Callable[[Sequence[BaseSignal]], Sequence[BaseSignal]]
+ActTransform = Callable[[Sequence[BaseClue]], Sequence[BaseClue]]
 
 
 class Pipeline:
@@ -50,27 +50,27 @@ class Pipeline:
         scene_pairs = [(int(item["scene"]), str(item["text"])) for item in scenes]
         scene_ids = [sid for sid, _ in scene_pairs]
 
-        signals_by_modality: dict[str, list[BaseSignal]] = defaultdict(list)
-        all_signals: list[BaseSignal] = []
+        clues_by_type: dict[str, list[BaseClue]] = defaultdict(list)
+        all_clues: list[BaseClue] = []
         for _, extractor in self.registry.items():
             outputs = list(extractor.batch_extract(scene_pairs))
-            all_signals.extend(outputs)
-            for signal in outputs:
-                modality = getattr(signal, "modality", "")
-                signals_by_modality[modality].append(signal)
+            all_clues.extend(outputs)
+            for clue in outputs:
+                clue_type = getattr(clue, "clue_type", "")
+                clues_by_type[clue_type].append(clue)
 
-        act_clues = list(signals_by_modality.get("act", []))
-        tom_clues = list(signals_by_modality.get("tom", []))
-        temporal_clues = list(signals_by_modality.get("temporal", []))
-        entity_clues = list(signals_by_modality.get("entity", []))
+        act_clues = list(clues_by_type.get("act", []))
+        tom_clues = list(clues_by_type.get("tom", []))
+        temporal_clues = list(clues_by_type.get("temporal", []))
+        entity_clues = list(clues_by_type.get("entity", []))
 
         context = ValidationContext(
             known_scenes=set(scene_ids),
             representative_act_ids={getattr(a, "id", "") for a in act_clues if getattr(a, "id", "")},
         )
-        validation_results = self.validator.validate_batch(all_signals, context=context)
+        validation_results = self.validator.validate_batch(all_clues, context=context)
 
-        fabula_rank = self.temporal.reconstruct(scene_ids, all_signals, metadata)
+        fabula_rank = self.temporal.reconstruct(scene_ids, all_clues, metadata)
 
         unique_names: set[str] = set()
         appearances: dict[str, set[int]] = defaultdict(set)

@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import time
 from collections import defaultdict
-from typing import Iterable, Literal, Sequence
+from typing import Iterable, Literal, Mapping, Sequence
 
 from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from clues.base import ClueExtractor, ClueValidator
-from schema import BaseSignal, ValidationResult
+from schema import BaseClue, ValidationResult
 from utils import log_status, parse_model
 
 
@@ -26,16 +26,16 @@ CORE CONCEPTS:
 HARD RULES:
 1. Evidence must be a direct quote (≤200 chars) showing the alias relationship.
 2. Extract ONLY if both names appear in the scene and clearly refer to the same person.
-3. ID format: "entity_{clue_id}_{scene:03d}_{index:04d}".
+3. ID format: "entity_{scene:03d}_{index:04d}".
 
 OUTPUT SCHEMA:
 {
   "participants": [list of person names],
   "entity_clues": [
     {
-      "id": "entity_{clue_id}_005_0001",
+      "id": "entity_005_0001",
       "scene": 5,
-      "modality": "entity",
+      "clue_type": "entity",
       "name": "Primary Name",
       "aliases_in_scene": ["Alias"],
       "evidence": "direct quote"
@@ -58,12 +58,22 @@ class _EntityExtractionPayload(BaseModel):
 
 
 class EntityValidator(ClueValidator):
-    def validate_semantic(self, signal: EntityClue) -> ValidationResult:
-        if not signal.aliases_in_scene:
+    def validate_semantic(self, clue: EntityClue) -> ValidationResult:
+        if not clue.aliases_in_scene:
             return ValidationResult.fail(
                 level="semantic", errors=["alias list must not be empty"]
             )
         return ValidationResult.ok(level="semantic")
+
+    def validate_coherence(
+        self, clue: EntityClue, context: Mapping[str, object] | None = None
+    ) -> ValidationResult | None:
+        if clue.aliases_in_scene:
+            return None
+        return ValidationResult.ok(
+            level="coherence",
+            warnings=["entity clue should list aliases if present"],
+        )
 
 
 class EntityExtractor(ClueExtractor):
@@ -74,7 +84,7 @@ class EntityExtractor(ClueExtractor):
         self._id_counters: defaultdict[int, int] = defaultdict(int)
 
     @property
-    def clue_id(self) -> str:  # noqa: D401
+    def clue_type(self) -> str:  # noqa: D401
         return "entity"
 
     def extract(self, scene_text: str, scene_id: int) -> Sequence[EntityClue]:
@@ -166,7 +176,7 @@ class EntityExtractor(ClueExtractor):
         assigned: list[EntityClue] = []
         for clue in clues:
             self._id_counters[scene_id] += 1
-            new_id = f"entity_auto_{scene_id:03d}_{self._id_counters[scene_id]:04d}"
+            new_id = f"{self.clue_type}_{scene_id:03d}_{self._id_counters[scene_id]:04d}"
             assigned.append(clue.model_copy(update={"id": new_id}))
         return assigned
 
@@ -205,8 +215,8 @@ class EntityExtractor(ClueExtractor):
         return 0.0
 
 
-class EntityClue(BaseSignal):
-    modality: Literal["entity"] = "entity"
+class EntityClue(BaseClue):
+    clue_type: Literal["entity"] = "entity"
     name: str
     aliases_in_scene: list[str] = Field(default_factory=list)
 
@@ -214,7 +224,7 @@ class EntityClue(BaseSignal):
 class EntityClueAPI(BaseModel):
     id: str | None = None
     scene: int
-    modality: Literal["entity"] = "entity"
+    clue_type: Literal["entity"] = "entity"
     evidence: str
     name: str
     aliases_in_scene: list[str] = Field(default_factory=list)

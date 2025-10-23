@@ -7,7 +7,7 @@ import networkx as nx
 
 from clues.act import ActClue
 from clues.temporal import TemporalClue
-from schema import BaseSignal
+from schema import BaseClue
 
 
 @dataclass(slots=True)
@@ -18,12 +18,12 @@ class Edge:
 
 
 class FabulaReconstructor:
-    """Reconstruct chronological scene order from heterogeneous signals."""
+    """Reconstruct chronological scene order from heterogeneous clues."""
 
     def reconstruct(
         self,
         scenes: Iterable[int],
-        signals: Sequence[BaseSignal],
+        clues: Sequence[BaseClue],
         input_metadata: dict[int, dict],
     ) -> dict[int, int]:
         nodes = list(dict.fromkeys(int(s) for s in scenes))
@@ -34,15 +34,15 @@ class FabulaReconstructor:
             for ref in refs:
                 edges.append(Edge(int(ref), scene_id, weight=1.0))
 
-        for signal in signals:
-            if isinstance(signal, TemporalClue):
-                for ref in signal.references_scenes:
-                    edges.append(Edge(int(ref), int(signal.scene), weight=0.8))
+        for clue in clues:
+            if isinstance(clue, TemporalClue):
+                for ref in clue.references_scenes:
+                    edges.append(Edge(int(ref), int(clue.scene), weight=0.8))
 
-        for signal in signals:
-            if isinstance(signal, ActClue):
-                for ref in signal.axes.consequence_refs:
-                    edges.append(Edge(int(signal.scene), int(ref), weight=0.6))
+        for clue in clues:
+            if isinstance(clue, ActClue):
+                for ref in clue.axes.consequence_refs:
+                    edges.append(Edge(int(clue.scene), int(ref), weight=0.6))
 
         order = self._topological_sort(nodes, edges)
         return {scene_id: idx for idx, scene_id in enumerate(order)}

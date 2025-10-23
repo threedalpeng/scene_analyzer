@@ -16,7 +16,7 @@ from utils import log_status, parse_model
 
 DYAD_SYSTEM_PROMPT = """
 You adjudicate relationship state across scenes for a dyad (character pair).
-Use ONLY the provided signal packs and return strict JSON per schema.
+Use ONLY the provided clue packs and return strict JSON per schema.
 
 {body}
 """.strip().format(

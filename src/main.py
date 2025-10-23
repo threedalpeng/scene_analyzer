@@ -30,10 +30,10 @@ def _load_metadata(path: Path | None) -> dict[int, dict]:
 
 def _serialize_validation(results):
     serialized = []
-    for signal, records in results:
+    for clue, records in results:
         serialized.append(
             {
-                "signal": signal.model_dump(),
+                "clue": clue.model_dump(),
                 "results": [r.model_dump() for r in records],
             }
         )

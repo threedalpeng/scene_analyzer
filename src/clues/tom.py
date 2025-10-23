@@ -9,12 +9,12 @@ from google.genai import types
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from clues.base import ClueExtractor, ClueValidator
-from schema import PairSignal, ValidationResult
+from schema import PairClue, ValidationResult
 from utils import log_status, parse_model
 
 
 TOM_SYSTEM_PROMPT = """
-You extract structured THEORY OF MIND signals from a single scene transcript.
+You extract structured THEORY OF MIND clues from a single scene transcript.
 Return ONLY JSON that satisfies the provided response schema exactly.
 
 CORE CONCEPTS:
@@ -37,7 +37,7 @@ HARD RULES:
 1. Evidence (MANDATORY): Direct quote from scene (≤200 chars)
    - Dialogue expressing belief or intention
    - Narration describing mental state
-   - Described behavior that explicitly signals the state
+  - Described behavior that explicitly indicates the state
 
 2. Explicit Signal Required:
    - Must be stated in dialogue, narration, or SDH cues
@@ -49,7 +49,7 @@ HARD RULES:
    - Target: Who the mental state is about
    - Exactly 2 names required
 
-4. ID Format: "tom_{clue_id}_{scene:03d}_{index:04d}"
+4. ID Format: "tom_{scene:03d}_{index:04d}"
 
 OUTPUT SCHEMA:
 
@@ -57,10 +57,10 @@ OUTPUT SCHEMA:
   "participants": [list of all person names],
   "tom_clues": [
     {
-      "id": "tom_{clue_id}_005_0001",
+      "id": "tom_005_0001",
       "scene": 5,
       "pair": ["Thinker", "Target"],
-      "modality": "tom",
+      "clue_type": "tom",
       "evidence": "direct quote ≤200 chars",
       "kind": "BelievesAbout|FeelsTowards|IntendsTo|DesiresFor",
       "claim": "short literal statement"
@@ -88,8 +88,8 @@ class _ToMExtractionPayload(BaseModel):
 
 
 class ToMValidator(ClueValidator):
-    def validate_semantic(self, signal: ToMClue) -> ValidationResult:
-        if not signal.claim:
+    def validate_semantic(self, clue: ToMClue) -> ValidationResult:
+        if not clue.claim:
             return ValidationResult.fail(
                 level="semantic", errors=["claim must be non-empty"]
             )
@@ -104,7 +104,7 @@ class ToMExtractor(ClueExtractor):
         self._id_counters: defaultdict[int, int] = defaultdict(int)
 
     @property
-    def clue_id(self) -> str:  # noqa: D401
+    def clue_type(self) -> str:  # noqa: D401
         return "tom"
 
     def extract(self, scene_text: str, scene_id: int) -> Sequence[ToMClue]:
@@ -194,7 +194,7 @@ class ToMExtractor(ClueExtractor):
         assigned: list[ToMClue] = []
         for clue in clues:
             self._id_counters[scene_id] += 1
-            new_id = f"tom_auto_{scene_id:03d}_{self._id_counters[scene_id]:04d}"
+            new_id = f"{self.clue_type}_{scene_id:03d}_{self._id_counters[scene_id]:04d}"
             assigned.append(clue.model_copy(update={"id": new_id}))
         return assigned
 
@@ -236,8 +236,8 @@ class ToMExtractor(ClueExtractor):
 ToMKind = Literal["BelievesAbout", "FeelsTowards", "IntendsTo", "DesiresFor"]
 
 
-class ToMClue(PairSignal):
-    modality: Literal["tom"] = "tom"
+class ToMClue(PairClue):
+    clue_type: Literal["tom"] = "tom"
     kind: ToMKind
     claim: str
 
@@ -246,7 +246,7 @@ class ToMClueAPI(BaseModel):
     id: str | None = None
     scene: int
     pair: list[str] = Field(min_length=2, max_length=2)
-    modality: Literal["tom"] = "tom"
+    clue_type: Literal["tom"] = "tom"
     evidence: str
     kind: ToMKind
     claim: str

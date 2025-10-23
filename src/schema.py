@@ -35,10 +35,10 @@ class ValidationResult(BaseModel):
         return cls(passed=False, level=level, errors=errors, warnings=warnings or [])
 
 
-class BaseSignal(BaseModel):
+class BaseClue(BaseModel):
     id: str
     scene: int
-    modality: str
+    clue_type: str
     evidence: str
 
     @field_validator("evidence")
@@ -48,7 +48,7 @@ class BaseSignal(BaseModel):
         return v if len(v) <= 200 else v[:200]
 
 
-class PairSignal(BaseSignal):
+class PairClue(BaseClue):
     pair: tuple[str, str]
 
     @field_validator("pair")

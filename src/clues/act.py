@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 from collections import defaultdict
-from typing import Iterable, Literal, Sequence
+from typing import Iterable, Literal, Mapping, Sequence
 
 from google import genai
 from google.genai import types
@@ -12,7 +12,7 @@ from clues.base import ClueExtractor, ClueValidator
 from schema import (
     Durability,
     GoalAlignment,
-    PairSignal,
+    PairClue,
     Salience,
     Stakes,
     ValidationResult,
@@ -71,7 +71,7 @@ def bundle_same_scene(acts: Sequence["ActClue"]) -> list["ActClue"]:
 
 
 ACT_SYSTEM_PROMPT = """
-You extract structured relationship ACTION signals from a single scene transcript.
+You extract structured relationship ACTION clues from a single scene transcript.
 Return ONLY JSON that satisfies the provided response schema exactly.
 
 {prompt_body}
@@ -118,7 +118,7 @@ HARD RULES:
    - If multiple actors or targets, create separate action entries
    - If you cannot confidently identify BOTH sides, OMIT
 
-3. ID Format (STRICT): "act_{clue_id}_{scene:03d}_{index:04d}"
+3. ID Format (STRICT): "act_{scene:03d}_{index:04d}"
    - scene: zero-padded scene number
    - index: starts at 1, increments per action
 
@@ -132,10 +132,10 @@ OUTPUT SCHEMA:
   "participants": [list of all person names in scene],
   "act_clues": [
     {
-      "id": "act_{clue_id}_005_0001",
+      "id": "act_005_0001",
       "scene": 5,
       "pair": ["ActorName", "TargetName"],
-      "modality": "act",
+      "clue_type": "act",
       "evidence": "direct quote ≤200 chars",
       "actors": ["ActorName"],
       "targets": ["TargetName"],
@@ -162,19 +162,6 @@ QUALITY GUARDS:
 )
 
 
-STAKE_RANK = {"major": 3, "moderate": 2, "minor": 1}
-SALIENCE_RANK = {"high": 3, "medium": 2, "low": 1}
-DURABILITY_RANK = {"persistent": 3, "temporary": 2, "momentary": 1}
-
-
-def act_score(clue: "ActClue") -> int:
-    return (
-        100 * STAKE_RANK.get(clue.axes.stakes, 0)
-        + 10 * SALIENCE_RANK.get(clue.axes.salience, 0)
-        + DURABILITY_RANK.get(clue.axes.durability, 0)
-    )
-
-
 def _act_user_prompt(scene_id: int, text: str) -> str:
     return f"""SCENE_ID: {scene_id}\nTEXT:\n{text}\n\nExtract only the required action clues.""".strip()
 
@@ -188,11 +175,31 @@ class _ActExtractionPayload(BaseModel):
 
 
 class ActValidator(ClueValidator):
-    def validate_semantic(self, signal: ActClue) -> ValidationResult:
+    def validate_semantic(self, clue: ActClue) -> ValidationResult:
         warnings: list[str] = []
-        if signal.axes.stakes == "major" and not signal.axes.consequence_refs:
+        if clue.axes.stakes == "major" and not clue.axes.consequence_refs:
             warnings.append("major stakes usually reference downstream scenes")
         return ValidationResult.ok(level="semantic", warnings=warnings)
+
+    def validate_coherence(
+        self, clue: ActClue, context: Mapping[str, object] | None = None
+    ) -> ValidationResult | None:
+        if context is None:
+            return None
+        known = context.get("known_scenes", set())
+        known_set = set(known) if isinstance(known, (set, list, tuple)) else set()
+        missing = [
+            ref for ref in clue.axes.consequence_refs if ref not in known_set
+        ]
+        if missing:
+            return ValidationResult.ok(
+                level="coherence",
+                warnings=[
+                    "act clue consequence_refs reference unknown scenes: "
+                    + ", ".join(str(m) for m in missing)
+                ],
+            )
+        return None
 
 
 class ActExtractor(ClueExtractor):
@@ -205,7 +212,7 @@ class ActExtractor(ClueExtractor):
         self._id_counters: defaultdict[int, int] = defaultdict(int)
 
     @property
-    def clue_id(self) -> str:  # noqa: D401
+    def clue_type(self) -> str:  # noqa: D401
         return "act"
 
     def extract(self, scene_text: str, scene_id: int) -> Sequence[ActClue]:
@@ -295,7 +302,7 @@ class ActExtractor(ClueExtractor):
         assigned: list[ActClue] = []
         for clue in clues:
             self._id_counters[scene_id] += 1
-            new_id = f"act_auto_{scene_id:03d}_{self._id_counters[scene_id]:04d}"
+            new_id = f"{self.clue_type}_{scene_id:03d}_{self._id_counters[scene_id]:04d}"
             assigned.append(clue.model_copy(update={"id": new_id}))
         return assigned
 
@@ -346,8 +353,8 @@ class Axes(BaseModel):
     consequence_refs: list[int] = Field(default_factory=list)
 
 
-class ActClue(PairSignal):
-    modality: Literal["act"] = "act"
+class ActClue(PairClue):
+    clue_type: Literal["act"] = "act"
     actors: list[str] = Field(default_factory=list)
     targets: list[str] = Field(default_factory=list)
     valence: ValenceCore
@@ -369,7 +376,7 @@ class ActClueAPI(BaseModel):
     id: str | None = None
     scene: int
     pair: list[str] = Field(min_length=2, max_length=2)
-    modality: Literal["act"] = "act"
+    clue_type: Literal["act"] = "act"
     evidence: str
     actors: list[str] = Field(default_factory=list)
     targets: list[str] = Field(default_factory=list)
@@ -398,4 +405,6 @@ __all__ = [
     "Axes",
     "ValenceCore",
     "act_score",
+    "explode_directed",
+    "bundle_same_scene",
 ]

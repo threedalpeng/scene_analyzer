@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import time
 from collections import defaultdict
-from typing import Iterable, Literal, Sequence
+from typing import Iterable, Literal, Mapping, Sequence
 
 from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
-from clues.base import ClueExtractor
-from schema import BaseSignal
+from clues.base import ClueExtractor, ClueValidator
+from schema import BaseClue, ValidationResult
 from utils import log_status, parse_model
 
 
@@ -31,15 +31,15 @@ Is_flashback: True if the scene is presented out of chronological order.
 HARD RULES:
 - Evidence (≤200 chars) must be direct quote indicating the temporal relationship.
 - Use ONLY explicit textual evidence: temporal markers, dialogue references, SDH cues.
-- ID Format: "temporal_{clue_id}_{scene:03d}_{index:04d}".
+- ID Format: "temporal_{scene:03d}_{index:04d}".
 
 OUTPUT SCHEMA:
 {
   "temporal_clues": [
     {
-      "id": "temporal_{clue_id}_005_0001",
+      "id": "temporal_005_0001",
       "scene": 5,
-      "modality": "temporal",
+      "clue_type": "temporal",
       "references_scenes": [1, 2],
       "time_offset": -1095,
       "is_flashback": true,
@@ -62,6 +62,31 @@ class _TemporalExtractionPayload(BaseModel):
         return [c.to_internal() for c in self.temporal_clues]
 
 
+class TemporalValidator(ClueValidator):
+    def validate_semantic(self, clue: BaseClue) -> ValidationResult:
+        _ = clue
+        return ValidationResult.ok(level="semantic")
+
+    def validate_coherence(
+        self, clue: BaseClue, context: Mapping[str, object] | None = None
+    ) -> ValidationResult | None:
+        if context is None:
+            return None
+        references = getattr(clue, "references_scenes", [])
+        known = context.get("known_scenes", set())
+        known_set = set(known) if isinstance(known, (set, list, tuple)) else set()
+        missing = [ref for ref in references if ref not in known_set]
+        if missing:
+            return ValidationResult.ok(
+                level="coherence",
+                warnings=[
+                    "temporal clue references unknown scene ids: "
+                    + ", ".join(str(m) for m in missing)
+                ],
+            )
+        return None
+
+
 class TemporalExtractor(ClueExtractor):
     def __init__(self, client: genai.Client, *, batch_size: int = 10) -> None:
         self._client = client
@@ -69,7 +94,7 @@ class TemporalExtractor(ClueExtractor):
         self._id_counters: defaultdict[int, int] = defaultdict(int)
 
     @property
-    def clue_id(self) -> str:  # noqa: D401
+    def clue_type(self) -> str:  # noqa: D401
         return "temporal"
 
     def extract(self, scene_text: str, scene_id: int) -> Sequence[TemporalClue]:
@@ -159,7 +184,7 @@ class TemporalExtractor(ClueExtractor):
         assigned: list[TemporalClue] = []
         for clue in clues:
             self._id_counters[scene_id] += 1
-            new_id = f"temporal_auto_{scene_id:03d}_{self._id_counters[scene_id]:04d}"
+            new_id = f"{self.clue_type}_{scene_id:03d}_{self._id_counters[scene_id]:04d}"
             assigned.append(clue.model_copy(update={"id": new_id}))
         return assigned
 
@@ -191,9 +216,12 @@ class TemporalExtractor(ClueExtractor):
         _ = clue
         return 0.0
 
+    def validator(self) -> ClueValidator:
+        return TemporalValidator()
 
-class TemporalClue(BaseSignal):
-    modality: Literal["temporal"] = "temporal"
+
+class TemporalClue(BaseClue):
+    clue_type: Literal["temporal"] = "temporal"
     references_scenes: list[int] = Field(default_factory=list)
     time_offset: int | None = None
     is_flashback: bool
@@ -202,7 +230,7 @@ class TemporalClue(BaseSignal):
 class TemporalClueAPI(BaseModel):
     id: str | None = None
     scene: int
-    modality: Literal["temporal"] = "temporal"
+    clue_type: Literal["temporal"] = "temporal"
     evidence: str
     references_scenes: list[int] = Field(default_factory=list)
     time_offset: int | None = None

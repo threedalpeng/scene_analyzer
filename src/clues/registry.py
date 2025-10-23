@@ -12,7 +12,7 @@ class ClueRegistry:
         self._extractors: Dict[str, ClueExtractor] = {}
 
     def register(self, extractor: ClueExtractor) -> None:
-        cid = extractor.clue_id
+        cid = extractor.clue_type
         if cid in self._extractors:
             raise ValueError(f"clue '{cid}' already registered")
         self._extractors[cid] = extractor
@@ -21,11 +21,11 @@ class ClueRegistry:
         for ex in extractors:
             self.register(ex)
 
-    def get(self, clue_id: str) -> ClueExtractor:
+    def get(self, clue_type: str) -> ClueExtractor:
         try:
-            return self._extractors[clue_id]
+            return self._extractors[clue_type]
         except KeyError as err:
-            raise KeyError(f"no extractor registered for '{clue_id}'") from err
+            raise KeyError(f"no extractor registered for '{clue_type}'") from err
 
     def items(self) -> Iterator[tuple[str, ClueExtractor]]:
         return iter(self._extractors.items())
@@ -33,8 +33,8 @@ class ClueRegistry:
     def values(self) -> Iterator[ClueExtractor]:
         return iter(self._extractors.values())
 
-    def __contains__(self, clue_id: str) -> bool:
-        return clue_id in self._extractors
+    def __contains__(self, clue_type: str) -> bool:
+        return clue_type in self._extractors
 
     def __len__(self) -> int:
         return len(self._extractors)
