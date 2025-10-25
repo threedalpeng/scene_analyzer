@@ -74,10 +74,7 @@ class ValidationPipeline:
     def validate_batch(
         self, clues: Iterable[BaseClue], *, context: ValidationContext | None = None
     ) -> list[tuple[BaseClue, Sequence[ValidationResult]]]:
-        return [
-            (clue, self.validate_clue(clue, context=context))
-            for clue in clues
-        ]
+        return [(clue, self.validate_clue(clue, context=context)) for clue in clues]
 
     @staticmethod
     def _validate_structural(clue: BaseClue) -> ValidationResult:

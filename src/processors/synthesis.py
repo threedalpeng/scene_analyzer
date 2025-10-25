@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass, field
-from typing import Iterable, TYPE_CHECKING
+from typing import TYPE_CHECKING, Iterable
 
 from google import genai
 from google.genai import types
@@ -161,7 +161,9 @@ class DyadSynthesizer:
         if config.batch_size is not None:
             self._batch_size = config.batch_size
         if self._client is None:
-            raise ValueError("DyadSynthesizer requires a client; none provided in config")
+            raise ValueError(
+                "DyadSynthesizer requires a client; none provided in config"
+            )
 
     def __call__(self, result: PipelineResult) -> SynthesisResult:
         acts = result.get(ActClue)
@@ -184,7 +186,9 @@ class DyadSynthesizer:
             return {}
 
         if self._client is None:
-            raise ValueError("DyadSynthesizer must be configured with a client before use")
+            raise ValueError(
+                "DyadSynthesizer must be configured with a client before use"
+            )
 
         results: dict[tuple[str, str], LLMAdjudication] = {}
         chunk = self._batch_size
@@ -233,12 +237,12 @@ class DyadSynthesizer:
                         f"SYN batch {batch_idx}: inline {idx} error -> {resp.error}"
                     )
                     continue
-                parsed = getattr(resp.response, "parsed", None) if resp.response else None
+                parsed = (
+                    getattr(resp.response, "parsed", None) if resp.response else None
+                )
                 raw_payload = parsed or getattr(resp.response, "text", None)
                 if raw_payload is None:
-                    log_status(
-                        f"SYN batch {batch_idx}: inline {idx} empty response"
-                    )
+                    log_status(f"SYN batch {batch_idx}: inline {idx} empty response")
                     continue
 
                 adjudication = parse_model(LLMAdjudication, raw_payload)
@@ -259,7 +263,11 @@ class DyadSynthesizer:
                         {
                             "role": "user",
                             "parts": [
-                                {"text": _dyad_user_payload(dossier, toms, causal, stats)}
+                                {
+                                    "text": _dyad_user_payload(
+                                        dossier, toms, causal, stats
+                                    )
+                                }
                             ],
                         }
                     ],

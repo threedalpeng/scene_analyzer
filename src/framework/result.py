@@ -50,7 +50,9 @@ class PipelineResult:
     def put_clues(self, clue_type: Type[BaseClue], clues: Iterable[BaseClue]) -> None:
         self._clues[clue_type] = list(clues)
 
-    def append_clues(self, clue_type: Type[BaseClue], clues: Iterable[BaseClue]) -> None:
+    def append_clues(
+        self, clue_type: Type[BaseClue], clues: Iterable[BaseClue]
+    ) -> None:
         bucket = self._clues.setdefault(clue_type, [])
         bucket.extend(clues)
 

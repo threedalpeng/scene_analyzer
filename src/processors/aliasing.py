@@ -10,8 +10,8 @@ from clues.entity import EntityClue
 from clues.tom import ToMClue
 from framework.result import PipelineResult
 from merge_entity import alias_name, alias_pair, build_alias_map, run_s2_alias
-from schema import AliasGroup, AliasGroups
 from processors.results import AliasingResult
+from schema import AliasGroup, AliasGroups
 
 if TYPE_CHECKING:
     from framework.pipeline import PipelineConfig

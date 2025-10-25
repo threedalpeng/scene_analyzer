@@ -28,7 +28,9 @@ class ClueRegistry:
         try:
             return self._extractors[clue_type]
         except KeyError as err:
-            raise KeyError(f"no extractor registered for '{clue_type.__name__}'") from err
+            raise KeyError(
+                f"no extractor registered for '{clue_type.__name__}'"
+            ) from err
 
     def items(self) -> Iterator[tuple[type[BaseClue], ClueExtractor]]:
         return iter(self._extractors.items())

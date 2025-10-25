@@ -2,14 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Iterable, Mapping, Sequence, Type
+from typing import Any, Callable, Mapping, Sequence, Type
 
 from framework.base import ClueExtractor
 from framework.registry import ClueRegistry
 from framework.result import PipelineResult
 from framework.validation import ValidationContext, ValidationPipeline
 from schema import BaseClue, ValidationResult
-
 
 Processor = Callable[[PipelineResult], Any]
 
@@ -105,10 +104,8 @@ class Pipeline:
         for extractor in self._extractors:
             clues = list(extractor.batch_extract(scene_pairs))
             result.put_clues(extractor.clue_type, clues)
-            participants = getattr(extractor, "participants", None)
-            if callable(participants):
-                for scene_id, names in dict(participants()).items():
-                    result.put_participants(scene_id, names)
+            for scene_id, names in extractor.participants().items():
+                result.put_participants(scene_id, names)
 
         if self.config.validate:
             validator = ValidationPipeline(registry)
@@ -154,7 +151,7 @@ class Pipeline:
 
     @staticmethod
     def _raise_on_validation_errors(
-        validations: Sequence[tuple[BaseClue, Sequence[ValidationResult]]]
+        validations: Sequence[tuple[BaseClue, Sequence[ValidationResult]]],
     ) -> None:
         errors: list[str] = []
         for clue, records in validations:

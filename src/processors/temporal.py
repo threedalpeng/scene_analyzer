@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, Sequence, TYPE_CHECKING
+from typing import TYPE_CHECKING, Iterable, Sequence
 
 import networkx as nx
 
@@ -11,6 +11,7 @@ from schema import BaseClue
 
 if TYPE_CHECKING:
     from framework.pipeline import PipelineConfig
+
 
 @dataclass(slots=True)
 class Edge:

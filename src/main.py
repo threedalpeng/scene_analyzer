@@ -12,6 +12,7 @@ from processors.aliasing import AliasResolver
 from processors.results import AliasingResult, SynthesisResult, TemporalResult
 from processors.synthesis import DyadSynthesizer
 from processors.temporal import TemporalReconstructor
+from schema import LLMAdjudication
 from utils import ensure_dir, jsonl_write, log_status
 
 
@@ -39,15 +40,10 @@ def _serialize_validation(results):
     return serialized
 
 
-def _serialize_dyads(dyads: dict[tuple[str, str], object]) -> list[dict]:
+def _serialize_dyads(dyads: dict[tuple[str, str], LLMAdjudication]) -> list[dict]:
     out: list[dict] = []
     for pair, adjudication in dyads.items():
-        model = (
-            adjudication.model_dump()
-            if hasattr(adjudication, "model_dump")
-            else adjudication
-        )
-        out.append({"pair": list(pair), "adjudication": model})
+        out.append({"pair": list(pair), "adjudication": adjudication.model_dump()})
     return out
 
 
@@ -55,8 +51,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run narrative analysis pipeline")
     parser.add_argument("scenes", type=Path, help="Path to scenes JSONL input")
     parser.add_argument("out", type=Path, help="Output directory")
-    parser.add_argument("--metadata", type=Path, default=None, help="Optional fabula metadata JSON")
-    parser.add_argument("--batch", type=int, default=10, help="Batch size for Gemini requests")
+    parser.add_argument(
+        "--metadata", type=Path, default=None, help="Optional fabula metadata JSON"
+    )
+    parser.add_argument(
+        "--batch", type=int, default=10, help="Batch size for Gemini requests"
+    )
     args = parser.parse_args()
 
     ensure_dir(args.out)
@@ -104,7 +104,7 @@ def main() -> None:
     aliasing = pipeline_result.get(AliasingResult)
     if aliasing:
         (args.out / "alias_groups.json").write_text(
-            aliasing.alias_groups.model_dump_json(indent=2, ensure_ascii=False),
+            aliasing.alias_groups.model_dump_json(indent=2),
             encoding="utf-8",
         )
         (args.out / "alias_map.json").write_text(
