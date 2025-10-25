@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import TYPE_CHECKING, Any, Literal, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Literal, Mapping, Sequence, Type
 
 from google.genai import types
 from pydantic import BaseModel, Field, computed_field, field_validator
@@ -71,13 +71,7 @@ def bundle_same_scene(acts: Sequence["ActClue"]) -> list["ActClue"]:
     return representatives
 
 
-ACT_SYSTEM_PROMPT = """
-You extract structured relationship ACTION clues from a single scene transcript.
-Return ONLY JSON that satisfies the provided response schema exactly.
-
-{prompt_body}
-""".strip().format(
-    prompt_body="""
+ACT_PROMPT_RULES = """
 CORE CONCEPTS:
 
 Action: An observable behavior where one character (actor) does something that 
@@ -159,7 +153,14 @@ QUALITY GUARDS:
 - Omit any action you're not fully confident about
 - NO assumptions about camera work or unstated plot devices
 - Names must match exactly as written in scene text
-"""
+""".strip()
+
+ACT_PROMPT_SECTION = f"## ACT CLUES\n{ACT_PROMPT_RULES}"
+
+ACT_SYSTEM_PROMPT = (
+    "You extract structured relationship ACTION clues from a single scene transcript.\n"
+    "Return ONLY JSON that satisfies the provided response schema exactly.\n\n"
+    f"{ACT_PROMPT_RULES}"
 )
 
 
@@ -248,6 +249,12 @@ class ActExtractor(BatchExtractor):
     ) -> tuple[list[str], list[ActClue]]:
         payload = parse_model(_ActExtractionPayload, raw_payload)
         return payload.to_internal()
+
+    def get_prompt_section(self) -> str:
+        return ACT_PROMPT_SECTION
+
+    def get_api_model(self) -> Type[BaseModel]:
+        return ActClueAPI
 
     def score(self, clue: ActClue) -> float:
         return float(act_score(clue))

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Literal, Mapping
+from typing import TYPE_CHECKING, Any, Literal, Mapping, Type
 
 from google.genai import types
 from pydantic import BaseModel, Field, field_validator
@@ -13,10 +13,7 @@ if TYPE_CHECKING:
     from framework.pipeline import PipelineConfig
 
 
-ENTITY_SYSTEM_PROMPT = """
-You extract CHARACTER IDENTITIES and ALIAS relationships from scene text.
-Return ONLY JSON that satisfies the provided response schema exactly.
-
+ENTITY_PROMPT_RULES = """
 PURPOSE: Help resolve multiple names referring to the same person.
 
 CORE CONCEPTS:
@@ -42,7 +39,15 @@ OUTPUT SCHEMA:
     }
   ]
 }
-"""
+""".strip()
+
+ENTITY_PROMPT_SECTION = f"## ENTITY CLUES\n{ENTITY_PROMPT_RULES}"
+
+ENTITY_SYSTEM_PROMPT = (
+    "You extract CHARACTER IDENTITIES and ALIAS relationships from scene text.\n"
+    "Return ONLY JSON that satisfies the provided response schema exactly.\n\n"
+    f"{ENTITY_PROMPT_RULES}"
+)
 
 
 def _entity_user_prompt(scene_id: int, text: str) -> str:
@@ -125,6 +130,12 @@ class EntityExtractor(BatchExtractor):
     ) -> tuple[list[str], list[EntityClue]]:
         payload = parse_model(_EntityExtractionPayload, raw_payload)
         return payload.to_internal()
+
+    def get_prompt_section(self) -> str:
+        return ENTITY_PROMPT_SECTION
+
+    def get_api_model(self) -> Type[BaseModel]:
+        return EntityClueAPI
 
     def score(self, clue: EntityClue) -> float:
         _ = clue

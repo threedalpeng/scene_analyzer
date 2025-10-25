@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Literal, Mapping, TYPE_CHECKING
+from typing import Any, Literal, Mapping, TYPE_CHECKING, Type
 
 from google.genai import types
 from pydantic import BaseModel, Field, field_validator
@@ -13,15 +13,9 @@ if TYPE_CHECKING:
     from framework.pipeline import PipelineConfig
 
 
-TEMPORAL_SYSTEM_PROMPT = """
-You extract TEMPORAL RELATIONSHIPS between scenes from scene text.
-Return ONLY JSON that satisfies the provided response schema exactly.
-
+TEMPORAL_PROMPT_RULES = """
 PURPOSE: Help reconstruct chronological order (Fabula) from presentation order (Syuzhet).
 
-{rules}
-""".strip().format(
-    rules="""
 CORE CONCEPTS:
 
 References_scenes: Which past scenes does THIS scene reference or continue?
@@ -47,7 +41,14 @@ OUTPUT SCHEMA:
     }
   ]
 }
-"""
+""".strip()
+
+TEMPORAL_PROMPT_SECTION = f"## TEMPORAL CLUES\n{TEMPORAL_PROMPT_RULES}"
+
+TEMPORAL_SYSTEM_PROMPT = (
+    "You extract TEMPORAL RELATIONSHIPS between scenes from scene text.\n"
+    "Return ONLY JSON that satisfies the provided response schema exactly.\n\n"
+    f"{TEMPORAL_PROMPT_RULES}"
 )
 
 
@@ -136,6 +137,12 @@ class TemporalExtractor(BatchExtractor):
     ) -> tuple[list[str], list[TemporalClue]]:
         payload = parse_model(_TemporalExtractionPayload, raw_payload)
         return payload.to_internal()
+
+    def get_prompt_section(self) -> str:
+        return TEMPORAL_PROMPT_SECTION
+
+    def get_api_model(self) -> Type[BaseModel]:
+        return TemporalClueAPI
 
     def score(self, clue: TemporalClue) -> float:
         _ = clue

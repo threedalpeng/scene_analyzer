@@ -16,10 +16,10 @@ from typing import (
 )
 
 from google.genai import types
-from pydantic import ValidationError
+from pydantic import BaseModel, Field, ValidationError, create_model
 
 from schema import BaseClue, ValidationResult
-from utils import log_status
+from utils import log_status, parse_model
 
 if TYPE_CHECKING:
     from framework.pipeline import PipelineConfig
@@ -87,6 +87,10 @@ class ClueExtractor(Generic[ClueT], ABC):
         """Return participants by scene; defaults to empty dict."""
         return {}
 
+    def registry_members(self) -> Sequence["ClueExtractor[Any]"]:
+        """Return extractors that should be registered for validation."""
+        return [self]
+
 
 class BatchExtractor(ClueExtractor[ClueT], ABC):
     """Template for extractors that operate over scene batches via LLM jobs."""
@@ -112,6 +116,14 @@ class BatchExtractor(ClueExtractor[ClueT], ABC):
         self, raw_payload: Any, scene_id: int
     ) -> tuple[list[str], list[ClueT]]:
         """Parse API response into (participants, clues)."""
+
+    @abstractmethod
+    def get_prompt_section(self) -> str:
+        """Return textual prompt instructions used in combined extraction."""
+
+    @abstractmethod
+    def get_api_model(self) -> Type[BaseModel]:
+        """Return the API response model for structured parsing."""
 
     def participants(self) -> Mapping[int, list[str]]:
         return self._participants
@@ -246,6 +258,172 @@ class BatchExtractor(ClueExtractor[ClueT], ABC):
             assigned.append(clue.model_copy(update={"id": new_id}))
         return assigned
 
+    def _parse_clue_list(
+        self, clue_list: Sequence[Mapping[str, Any] | BaseModel], scene_id: int
+    ) -> tuple[list[str], list[ClueT]]:
+        """Parse a subset of clues when part of a combined response."""
+        serialized: list[Mapping[str, Any]] = []
+        for clue in clue_list:
+            if isinstance(clue, BaseModel):
+                serialized.append(clue.model_dump())
+            else:
+                serialized.append(dict(clue))
+
+        payload = {
+            "participants": [],
+            f"{self._clue_slug}_clues": serialized,
+        }
+        return self._parse_response(payload, scene_id)
+
+
+class CombinedBatchExtractor(BatchExtractor[BaseClue]):
+    """Batch extractor that multiplexes several BatchExtractors into one call."""
+
+    _clue_slug = "combined"
+    _PROMPT_HEADER = (
+        "You extract MULTIPLE types of structured clues from a single scene.\n"
+        "Return JSON that includes ALL requested clue families exactly once."
+    )
+
+    def __init__(self, extractors: Sequence[BatchExtractor[Any]]) -> None:
+        super().__init__()
+        if not extractors:
+            raise ValueError("CombinedBatchExtractor requires at least one extractor")
+        self._sub_extractors: list[BatchExtractor[Any]] = list(extractors)
+        self._response_schema: type[BaseModel] | None = None
+        self._system_prompt: str | None = None
+        self._slug_counters: defaultdict[str, defaultdict[int, int]] = defaultdict(
+            lambda: defaultdict(int)
+        )
+
+    @property
+    def clue_type(self) -> Type[BaseClue]:  # noqa: D401
+        return BaseClue
+
+    def registry_members(self) -> Sequence["ClueExtractor[Any]"]:
+        return list(self._sub_extractors)
+
+    @property
+    def sub_extractors(self) -> Sequence[BatchExtractor[Any]]:
+        return tuple(self._sub_extractors)
+
+    def configure(self, config: "PipelineConfig") -> None:
+        super().configure(config)
+        if self._client is None:
+            self._client = config.client
+        if self._batch_size is None:
+            self._batch_size = config.batch_size or 10
+        if self._client is None:
+            raise ValueError("CombinedBatchExtractor requires a client")
+        for extractor in self._sub_extractors:
+            configure = getattr(extractor, "configure", None)
+            if callable(configure):
+                configure(config)
+
+    def get_prompt_section(self) -> str:  # pragma: no cover - unused for combined
+        return self._PROMPT_HEADER
+
+    def get_api_model(self) -> Type[BaseModel]:  # pragma: no cover - unused
+        if self._response_schema is None:
+            self._response_schema = self._build_combined_schema()
+        return self._response_schema
+
+    def _build_inline_requests(
+        self, scenes: list[dict]
+    ) -> list[types.InlinedRequestDict]:
+        schema, system_prompt = self._ensure_assets()
+        requests: list[types.InlinedRequestDict] = []
+        for item in scenes:
+            sid = int(item["scene"])
+            text = str(item["text"])
+            requests.append(
+                types.InlinedRequestDict(
+                    contents=[
+                        {
+                            "role": "user",
+                            "parts": [
+                                {
+                                    "text": f"SCENE_ID: {sid}\nTEXT:\n{text}\n\n"
+                                    "Extract every requested clue type."
+                                }
+                            ],
+                        }
+                    ],
+                    config=types.GenerateContentConfigDict(
+                        system_instruction=system_prompt,
+                        response_schema=schema,
+                        response_mime_type="application/json",
+                    ),
+                )
+            )
+        return requests
+
+    def _parse_response(
+        self, raw_payload: Any, scene_id: int
+    ) -> tuple[list[str], list[BaseClue]]:
+        schema, _ = self._ensure_assets()
+        payload_model = parse_model(schema, raw_payload)
+        payload = payload_model.model_dump()
+        combined_participants: set[str] = set(payload.get("participants", []) or [])
+        combined_clues: list[BaseClue] = []
+
+        for extractor in self._sub_extractors:
+            slug = extractor._clue_slug
+            clue_items = payload.get(f"{slug}_clues", [])
+            participants, clues = extractor._parse_clue_list(clue_items, scene_id)
+            combined_participants.update(participants)
+            combined_clues.extend(clues)
+
+        return sorted(combined_participants), combined_clues
+
+    def _assign_ids(self, scene_id: int, clues: list[BaseClue]) -> list[BaseClue]:
+        assigned: list[BaseClue] = []
+        for clue in clues:
+            slug = getattr(clue, "clue_type", "") or self._clue_slug
+            counters = self._slug_counters[slug]
+            counters[scene_id] += 1
+            new_id = f"{slug}_{scene_id:03d}_{counters[scene_id]:04d}"
+            assigned.append(clue.model_copy(update={"id": new_id}))
+        return assigned
+
+    def _build_combined_schema(self) -> type[BaseModel]:
+        fields: dict[str, tuple[type, Any]] = {
+            "participants": (list[str], Field(default_factory=list))
+        }
+        for extractor in self._sub_extractors:
+            slug = extractor._clue_slug
+            api_model = extractor.get_api_model()
+            fields[f"{slug}_clues"] = (
+                list[api_model],  # type: ignore[index]
+                Field(default_factory=list),
+            )
+        return create_model("CombinedExtractionPayload", **fields)  # type: ignore[arg-type]
+
+    def _build_system_prompt(self) -> str:
+        divider = "=" * 60
+        sections: list[str] = [self._PROMPT_HEADER.strip()]
+        for extractor in self._sub_extractors:
+            sections.append(divider)
+            sections.append(extractor.get_prompt_section().strip())
+        sections.append(divider)
+        sections.append("OUTPUT SCHEMA:\n" + self._render_schema_block())
+        return "\n".join(sections).strip()
+
+    def _render_schema_block(self) -> str:
+        lines = ['{', '  "participants": ["..."]']
+        for extractor in self._sub_extractors:
+            slug = extractor._clue_slug
+            lines.append(f'  "{slug}_clues": []')
+        lines.append("}")
+        return "\n".join(lines)
+
+    def _ensure_assets(self) -> tuple[type[BaseModel], str]:
+        if self._response_schema is None:
+            self._response_schema = self._build_combined_schema()
+        if self._system_prompt is None:
+            self._system_prompt = self._build_system_prompt()
+        return self._response_schema, self._system_prompt
+
 
 class NullValidator(ClueValidator):
     """Default validator that always passes semantic/ coherence checks."""
@@ -261,4 +439,10 @@ class NullValidator(ClueValidator):
         return None
 
 
-__all__ = ["BatchExtractor", "ClueExtractor", "ClueValidator", "NullValidator"]
+__all__ = [
+    "BatchExtractor",
+    "ClueExtractor",
+    "ClueValidator",
+    "CombinedBatchExtractor",
+    "NullValidator",
+]

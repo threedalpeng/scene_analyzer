@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Literal, TYPE_CHECKING
+from typing import Any, Literal, TYPE_CHECKING, Type
 
 from google.genai import types
 from pydantic import BaseModel, Field, field_validator
@@ -13,10 +13,7 @@ if TYPE_CHECKING:
     from framework.pipeline import PipelineConfig
 
 
-TOM_SYSTEM_PROMPT = """
-You extract structured THEORY OF MIND clues from a single scene transcript.
-Return ONLY JSON that satisfies the provided response schema exactly.
-
+TOM_PROMPT_RULES = """
 CORE CONCEPTS:
 
 Theory of Mind: Mental states (beliefs, feelings, intentions, desires) that 
@@ -72,7 +69,15 @@ QUALITY GUARDS:
 - Keep evidence ≤200 chars
 - Omit any clue you're not fully confident about
 - Names must match the scene text exactly
-"""
+""".strip()
+
+TOM_PROMPT_SECTION = f"## TOM CLUES\n{TOM_PROMPT_RULES}"
+
+TOM_SYSTEM_PROMPT = (
+    "You extract structured THEORY OF MIND clues from a single scene transcript.\n"
+    "Return ONLY JSON that satisfies the provided response schema exactly.\n\n"
+    f"{TOM_PROMPT_RULES}"
+)
 
 
 def _tom_user_prompt(scene_id: int, text: str) -> str:
@@ -143,6 +148,12 @@ class ToMExtractor(BatchExtractor):
     ) -> tuple[list[str], list[ToMClue]]:
         payload = parse_model(_ToMExtractionPayload, raw_payload)
         return payload.to_internal()
+
+    def get_prompt_section(self) -> str:
+        return TOM_PROMPT_SECTION
+
+    def get_api_model(self) -> Type[BaseModel]:
+        return ToMClueAPI
 
     def validator(self) -> ClueValidator:
         return ToMValidator()
