@@ -2,15 +2,18 @@ from __future__ import annotations
 
 import time
 from collections import defaultdict
-from typing import Iterable, Literal, Sequence
+from typing import Literal, TYPE_CHECKING
 
 from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
-from clues.base import ClueExtractor, ClueValidator
+from framework.base import BatchExtractor, ClueValidator
 from schema import PairClue, ValidationResult
 from utils import log_status, parse_model
+
+if TYPE_CHECKING:
+    from framework.pipeline import PipelineConfig
 
 
 TOM_SYSTEM_PROMPT = """
@@ -96,30 +99,41 @@ class ToMValidator(ClueValidator):
         return ValidationResult.ok(level="semantic")
 
 
-class ToMExtractor(ClueExtractor):
-    def __init__(self, client: genai.Client, *, batch_size: int = 10) -> None:
-        self._client = client
-        self._batch_size = batch_size
+class ToMExtractor(BatchExtractor):
+    _clue_slug = "tom"
+    def __init__(
+        self, client: genai.Client | None = None, *, batch_size: int | None = None
+    ) -> None:
+        super().__init__()
+        self._client: genai.Client | None = client
+        self._batch_size: int | None = batch_size
         self._participants: dict[int, list[str]] = {}
         self._id_counters: defaultdict[int, int] = defaultdict(int)
 
     @property
-    def clue_type(self) -> str:  # noqa: D401
-        return "tom"
+    def clue_type(self) -> type["ToMClue"]:  # noqa: D401
+        return ToMClue
 
-    def extract(self, scene_text: str, scene_id: int) -> Sequence[ToMClue]:
-        return self.batch_extract([(scene_id, scene_text)])
-
-    def batch_extract(self, items: Iterable[tuple[int, str]]) -> list[ToMClue]:
-        scenes = [{"scene": sid, "text": txt} for sid, txt in items]
-        return self._run_batch(scenes)
+    def configure(self, config: "PipelineConfig") -> None:
+        super().configure(config)
+        if self._client is None:
+            self._client = config.client
+        if self._batch_size is None:
+            self._batch_size = config.batch_size
+        if self._batch_size is None:
+            self._batch_size = 10
+        if self._client is None:
+            raise ValueError("ToMExtractor requires a client; none provided in config")
 
     def _run_batch(self, scenes: list[dict]) -> list[ToMClue]:
+        if self._client is None:
+            raise ValueError("ToMExtractor must be configured with a client before use")
+
         outputs: list[ToMClue] = []
         if not scenes:
             return outputs
 
-        chunk = self._batch_size
+        chunk = self._batch_size or 10
         total = (len(scenes) + chunk - 1) // chunk
 
         for i in range(0, len(scenes), chunk):
@@ -150,9 +164,7 @@ class ToMExtractor(ClueExtractor):
                 assert bj.state is not None
                 state_name = bj.state.name
                 if state_name != last_state:
-                    log_status(
-                        f"TOM batch {batch_idx}/{total}: {state_name.lower()}"
-                    )
+                    log_status(f"TOM batch {batch_idx}/{total}: {state_name.lower()}")
                     last_state = state_name
                 if state_name in done_states:
                     if state_name != "JOB_STATE_SUCCEEDED":
@@ -167,7 +179,9 @@ class ToMExtractor(ClueExtractor):
                         f"TOM batch {batch_idx}/{total}: inline {idx} error -> {resp.error}"
                     )
                     continue
-                parsed = getattr(resp.response, "parsed", None) if resp.response else None
+                parsed = (
+                    getattr(resp.response, "parsed", None) if resp.response else None
+                )
                 raw_payload = parsed or getattr(resp.response, "text", None)
                 if raw_payload is None:
                     log_status(
@@ -194,7 +208,9 @@ class ToMExtractor(ClueExtractor):
         assigned: list[ToMClue] = []
         for clue in clues:
             self._id_counters[scene_id] += 1
-            new_id = f"{self.clue_type}_{scene_id:03d}_{self._id_counters[scene_id]:04d}"
+            new_id = (
+                f"{self._clue_slug}_{scene_id:03d}_{self._id_counters[scene_id]:04d}"
+            )
             assigned.append(clue.model_copy(update={"id": new_id}))
         return assigned
 

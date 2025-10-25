@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Mapping, Sequence
 
-from clues.base import ClueExtractor
-from clues.registry import ClueRegistry
+from framework.base import ClueExtractor
+from framework.registry import ClueRegistry
 from schema import BaseClue, ValidationResult
 
 
@@ -13,7 +13,6 @@ class ValidationContext:
     """Context for coherence validation."""
 
     known_scenes: set[int]
-    representative_act_ids: set[str]
 
 
 class ValidationPipeline:
@@ -25,8 +24,11 @@ class ValidationPipeline:
     def _get_validator(self, clue: BaseClue) -> ClueExtractor | None:
         if self._registry is None:
             return None
+        clue_cls = type(clue)
+        if not isinstance(clue_cls, type) or not issubclass(clue_cls, BaseClue):
+            return None
         try:
-            return self._registry.get(clue.clue_type)
+            return self._registry.get(clue_cls)
         except KeyError:
             return None
 
@@ -52,7 +54,6 @@ class ValidationPipeline:
         if context is not None:
             context_payload: Mapping[str, object] = {
                 "known_scenes": context.known_scenes,
-                "representative_act_ids": context.representative_act_ids,
             }
         else:
             context_payload = {}

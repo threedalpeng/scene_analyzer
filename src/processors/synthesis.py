@@ -3,15 +3,20 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass, field
-from typing import Iterable
+from typing import Iterable, TYPE_CHECKING
 
 from google import genai
 from google.genai import types
 
-from clues.act import ActClue, act_score
+from clues.act import ActClue, act_score, bundle_same_scene, explode_directed
 from clues.tom import ToMClue
+from framework.result import PipelineResult
+from processors.results import SynthesisResult
 from schema import LLMAdjudication
 from utils import log_status, parse_model
+
+if TYPE_CHECKING:
+    from framework.pipeline import PipelineConfig
 
 
 DYAD_SYSTEM_PROMPT = """
@@ -144,16 +149,42 @@ def _packs_for_pair(bag: DyadBag) -> tuple[list[str], list[str], dict, dict]:
 
 
 class DyadSynthesizer:
-    def __init__(self, client: genai.Client, *, batch_size: int = 10) -> None:
+    def __init__(
+        self, client: genai.Client | None = None, *, batch_size: int | None = None
+    ) -> None:
         self._client = client
-        self._batch_size = batch_size
+        self._batch_size = batch_size or 10
 
-    def run_batch(
+    def configure(self, config: "PipelineConfig") -> None:
+        if self._client is None:
+            self._client = config.client
+        if config.batch_size is not None:
+            self._batch_size = config.batch_size
+        if self._client is None:
+            raise ValueError("DyadSynthesizer requires a client; none provided in config")
+
+    def __call__(self, result: PipelineResult) -> SynthesisResult:
+        acts = result.get(ActClue)
+        toms = result.get(ToMClue)
+        acts_representative = bundle_same_scene(acts)
+        acts_directed = explode_directed(acts)
+        bags = build_bags(toms, acts_representative, acts_directed)
+        adjudication = self._run_batch(bags.items())
+        return SynthesisResult(
+            acts_representative=acts_representative,
+            acts_directed=acts_directed,
+            dyad_results=adjudication,
+        )
+
+    def _run_batch(
         self, items: Iterable[tuple[tuple[str, str], DyadBag]]
     ) -> dict[tuple[str, str], LLMAdjudication]:
         items_list = list(items)
         if not items_list:
             return {}
+
+        if self._client is None:
+            raise ValueError("DyadSynthesizer must be configured with a client before use")
 
         results: dict[tuple[str, str], LLMAdjudication] = {}
         chunk = self._batch_size
@@ -202,12 +233,12 @@ class DyadSynthesizer:
                         f"SYN batch {batch_idx}: inline {idx} error -> {resp.error}"
                     )
                     continue
-                parsed = (
-                    getattr(resp.response, "parsed", None) if resp.response else None
-                )
+                parsed = getattr(resp.response, "parsed", None) if resp.response else None
                 raw_payload = parsed or getattr(resp.response, "text", None)
                 if raw_payload is None:
-                    log_status(f"SYN batch {batch_idx}: inline {idx} empty response")
+                    log_status(
+                        f"SYN batch {batch_idx}: inline {idx} empty response"
+                    )
                     continue
 
                 adjudication = parse_model(LLMAdjudication, raw_payload)
@@ -228,11 +259,7 @@ class DyadSynthesizer:
                         {
                             "role": "user",
                             "parts": [
-                                {
-                                    "text": _dyad_user_payload(
-                                        dossier, toms, causal, stats
-                                    )
-                                }
+                                {"text": _dyad_user_payload(dossier, toms, causal, stats)}
                             ],
                         }
                     ],
@@ -245,3 +272,10 @@ class DyadSynthesizer:
             )
             order.append(pair)
         return requests, order
+
+
+__all__ = [
+    "DyadSynthesizer",
+    "DyadBag",
+    "build_bags",
+]

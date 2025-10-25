@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, Sequence
+from typing import Iterable, Sequence, TYPE_CHECKING
 
 import networkx as nx
 
-from clues.act import ActClue
-from clues.temporal import TemporalClue
+from framework.result import PipelineResult
+from processors.results import TemporalResult
 from schema import BaseClue
 
+if TYPE_CHECKING:
+    from framework.pipeline import PipelineConfig
 
 @dataclass(slots=True)
 class Edge:
@@ -35,13 +37,15 @@ class FabulaReconstructor:
                 edges.append(Edge(int(ref), scene_id, weight=1.0))
 
         for clue in clues:
-            if isinstance(clue, TemporalClue):
-                for ref in clue.references_scenes:
+            if getattr(clue, "clue_type", "") == "temporal":
+                for ref in getattr(clue, "references_scenes", []):
                     edges.append(Edge(int(ref), int(clue.scene), weight=0.8))
 
         for clue in clues:
-            if isinstance(clue, ActClue):
-                for ref in clue.axes.consequence_refs:
+            if getattr(clue, "clue_type", "") == "act":
+                axes = getattr(clue, "axes", None)
+                consequence_refs = getattr(axes, "consequence_refs", []) if axes else []
+                for ref in consequence_refs:
                     edges.append(Edge(int(clue.scene), int(ref), weight=0.6))
 
         order = self._topological_sort(nodes, edges)
@@ -60,7 +64,7 @@ class FabulaReconstructor:
         try:
             order = list(nx.topological_sort(graph))
         except nx.NetworkXUnfeasible:
-            order = nodes[:]  # fallback to input order if still cyclic
+            order = nodes[:]
 
         unknown_nodes = [n for n in nodes if n not in order]
         return order + unknown_nodes
@@ -76,7 +80,6 @@ class FabulaReconstructor:
             if not cycle:
                 return
 
-            # Remove the lowest-weight edge in the detected cycle
             min_edge = min(
                 cycle,
                 key=lambda e: graph.edges[e[0], e[1]].get("weight", 0.0),
@@ -84,3 +87,22 @@ class FabulaReconstructor:
             graph.remove_edge(min_edge[0], min_edge[1])
             if nx.is_directed_acyclic_graph(graph):
                 return
+
+
+class TemporalReconstructor:
+    """Processor wrapper for fabula reconstruction."""
+
+    def __init__(self) -> None:
+        self._engine = FabulaReconstructor()
+
+    def configure(self, config: "PipelineConfig") -> None:  # noqa: D401
+        _ = config
+
+    def __call__(self, result: PipelineResult) -> TemporalResult:
+        scenes = [int(item["scene"]) for item in result.scenes]
+        metadata = result.metadata or {}
+        fabula = self._engine.reconstruct(scenes, result.all_clues, metadata)
+        return TemporalResult(fabula_rank=fabula)
+
+
+__all__ = ["TemporalReconstructor", "FabulaReconstructor"]

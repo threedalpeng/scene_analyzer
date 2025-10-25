@@ -2,15 +2,18 @@ from __future__ import annotations
 
 import time
 from collections import defaultdict
-from typing import Iterable, Literal, Mapping, Sequence
+from typing import Literal, Mapping, TYPE_CHECKING
 
 from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
-from clues.base import ClueExtractor, ClueValidator
+from framework.base import BatchExtractor, ClueValidator
 from schema import BaseClue, ValidationResult
 from utils import log_status, parse_model
+
+if TYPE_CHECKING:
+    from framework.pipeline import PipelineConfig
 
 
 TEMPORAL_SYSTEM_PROMPT = """
@@ -87,29 +90,40 @@ class TemporalValidator(ClueValidator):
         return None
 
 
-class TemporalExtractor(ClueExtractor):
-    def __init__(self, client: genai.Client, *, batch_size: int = 10) -> None:
+class TemporalExtractor(BatchExtractor):
+    _clue_slug = "temporal"
+    def __init__(
+        self, client: genai.Client | None = None, *, batch_size: int | None = None
+    ) -> None:
+        super().__init__()
         self._client = client
         self._batch_size = batch_size
         self._id_counters: defaultdict[int, int] = defaultdict(int)
 
     @property
-    def clue_type(self) -> str:  # noqa: D401
-        return "temporal"
+    def clue_type(self) -> type["TemporalClue"]:  # noqa: D401
+        return TemporalClue
 
-    def extract(self, scene_text: str, scene_id: int) -> Sequence[TemporalClue]:
-        return self.batch_extract([(scene_id, scene_text)])
-
-    def batch_extract(self, items: Iterable[tuple[int, str]]) -> list[TemporalClue]:
-        scenes = [{"scene": sid, "text": txt} for sid, txt in items]
-        return self._run_batch(scenes)
+    def configure(self, config: "PipelineConfig") -> None:
+        super().configure(config)
+        if self._client is None:
+            self._client = config.client
+        if self._batch_size is None:
+            self._batch_size = config.batch_size
+        if self._batch_size is None:
+            self._batch_size = 10
+        if self._client is None:
+            raise ValueError("TemporalExtractor requires a client; none provided in config")
 
     def _run_batch(self, scenes: list[dict]) -> list[TemporalClue]:
+        if self._client is None:
+            raise ValueError("TemporalExtractor must be configured with a client before use")
+
         outputs: list[TemporalClue] = []
         if not scenes:
             return outputs
 
-        chunk = self._batch_size
+        chunk = self._batch_size or 10
         total = (len(scenes) + chunk - 1) // chunk
 
         for i in range(0, len(scenes), chunk):
@@ -184,7 +198,7 @@ class TemporalExtractor(ClueExtractor):
         assigned: list[TemporalClue] = []
         for clue in clues:
             self._id_counters[scene_id] += 1
-            new_id = f"{self.clue_type}_{scene_id:03d}_{self._id_counters[scene_id]:04d}"
+            new_id = f"{self._clue_slug}_{scene_id:03d}_{self._id_counters[scene_id]:04d}"
             assigned.append(clue.model_copy(update={"id": new_id}))
         return assigned
 

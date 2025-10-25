@@ -3,16 +3,15 @@ import json
 from pathlib import Path
 
 from client import make_client
-from clues.act import ActExtractor, bundle_same_scene, explode_directed
-from clues.entity import EntityExtractor
-from clues.registry import ClueRegistry
-from clues.temporal import TemporalExtractor
-from clues.tom import ToMExtractor
-from framework.aliasing import AliasResolver
-from framework.orchestrator import Pipeline
-from framework.synthesis import DyadSynthesizer
-from framework.temporal import FabulaReconstructor
-from framework.validation import ValidationPipeline
+from clues.act import ActClue, ActExtractor
+from clues.entity import EntityClue, EntityExtractor
+from clues.temporal import TemporalClue, TemporalExtractor
+from clues.tom import ToMClue, ToMExtractor
+from framework import Pipeline, PipelineConfig
+from processors.aliasing import AliasResolver
+from processors.results import AliasingResult, SynthesisResult, TemporalResult
+from processors.synthesis import DyadSynthesizer
+from processors.temporal import TemporalReconstructor
 from utils import ensure_dir, jsonl_write, log_status
 
 
@@ -63,83 +62,77 @@ def main() -> None:
     ensure_dir(args.out)
     client = make_client()
 
-    registry = ClueRegistry()
-    act_extractor = ActExtractor(client, batch_size=args.batch)
-    tom_extractor = ToMExtractor(client, batch_size=args.batch)
-    temporal_extractor = TemporalExtractor(client, batch_size=args.batch)
-    entity_extractor = EntityExtractor(client, batch_size=args.batch)
-    registry.register_many([
-        act_extractor,
-        tom_extractor,
-        temporal_extractor,
-        entity_extractor,
-    ])
-
-    validator = ValidationPipeline(registry)
-    fabula = FabulaReconstructor()
-    alias_resolver = AliasResolver(client)
-    synthesizer = DyadSynthesizer(client, batch_size=args.batch)
-
-    pipeline = Pipeline(
-        registry=registry,
-        validator=validator,
-        temporal=fabula,
-        alias_resolver=alias_resolver,
-        synthesizer=synthesizer,
-        act_bundle=bundle_same_scene,
-        act_explode=explode_directed,
+    config = PipelineConfig(client=client, batch_size=args.batch)
+    pipeline = (
+        Pipeline(config)
+        .extract(ActExtractor)
+        .extract(ToMExtractor)
+        .extract(TemporalExtractor)
+        .extract(EntityExtractor)
+        .process(AliasResolver())
+        .process(TemporalReconstructor())
+        .process(DyadSynthesizer())
     )
 
     scenes = _load_scenes(args.scenes)
     metadata = _load_metadata(args.metadata)
 
     log_status("Starting pipeline run")
-    result = pipeline.run(scenes, metadata=metadata)
+    pipeline_result = pipeline.run(scenes, metadata=metadata)
 
     jsonl_write(
         args.out / "act_clues.jsonl",
-        [clue.model_dump() for clue in result["act_clues"]],
+        [clue.model_dump() for clue in pipeline_result.get(ActClue)],
     )
     jsonl_write(
         args.out / "tom_clues.jsonl",
-        [clue.model_dump() for clue in result["tom_clues"]],
+        [clue.model_dump() for clue in pipeline_result.get(ToMClue)],
     )
     jsonl_write(
         args.out / "temporal_clues.jsonl",
-        [clue.model_dump() for clue in result["temporal_clues"]],
+        [clue.model_dump() for clue in pipeline_result.get(TemporalClue)],
     )
     jsonl_write(
         args.out / "entity_clues.jsonl",
-        [clue.model_dump() for clue in result["entity_clues"]],
+        [clue.model_dump() for clue in pipeline_result.get(EntityClue)],
     )
     jsonl_write(
         args.out / "validation.jsonl",
-        _serialize_validation(result["validation"]),
+        _serialize_validation(pipeline_result.validation),
     )
-    (args.out / "fabula_rank.json").write_text(
-        json.dumps(result["fabula_rank"], ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    (args.out / "alias_groups.json").write_text(
-        result["alias_groups"].model_dump_json(indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
-    (args.out / "alias_map.json").write_text(
-        json.dumps(result["alias_map"], ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    jsonl_write(
-        args.out / "acts_representative.jsonl",
-        [clue.model_dump() for clue in result["acts_representative"]],
-    )
-    jsonl_write(
-        args.out / "acts_directed.jsonl",
-        [clue.model_dump() for clue in result["acts_directed"]],
-    )
-    jsonl_write(
-        args.out / "dyad_results.jsonl",
-        _serialize_dyads(result["dyad_results"]),
-    )
+
+    aliasing = pipeline_result.get(AliasingResult)
+    if aliasing:
+        (args.out / "alias_groups.json").write_text(
+            aliasing.alias_groups.model_dump_json(indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        (args.out / "alias_map.json").write_text(
+            json.dumps(aliasing.alias_map, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+    temporal = pipeline_result.get(TemporalResult)
+    if temporal:
+        (args.out / "fabula_rank.json").write_text(
+            json.dumps(temporal.fabula_rank, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+    synthesis = pipeline_result.get(SynthesisResult)
+    if synthesis:
+        jsonl_write(
+            args.out / "acts_representative.jsonl",
+            [clue.model_dump() for clue in synthesis.acts_representative],
+        )
+        jsonl_write(
+            args.out / "acts_directed.jsonl",
+            [clue.model_dump() for clue in synthesis.acts_directed],
+        )
+        jsonl_write(
+            args.out / "dyad_results.jsonl",
+            _serialize_dyads(synthesis.dyad_results),
+        )
 
     log_status("Pipeline completed")
 

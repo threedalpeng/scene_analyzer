@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import time
 from collections import defaultdict
-from typing import Iterable, Literal, Mapping, Sequence
+from typing import Literal, Mapping, Sequence, TYPE_CHECKING
 
 from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field, ValidationError, computed_field, field_validator
 
-from clues.base import ClueExtractor, ClueValidator
+from framework.base import BatchExtractor, ClueValidator
 from schema import (
     Durability,
     GoalAlignment,
@@ -19,6 +19,9 @@ from schema import (
     Volition,
 )
 from utils import log_status, parse_model
+
+if TYPE_CHECKING:
+    from framework.pipeline import PipelineConfig
 
 STAKE_RANK = {"major": 3, "moderate": 2, "minor": 1}
 SALIENCE_RANK = {"high": 3, "medium": 2, "low": 1}
@@ -202,32 +205,44 @@ class ActValidator(ClueValidator):
         return None
 
 
-class ActExtractor(ClueExtractor):
+class ActExtractor(BatchExtractor):
+    _clue_slug = "act"
+
     """LLM-backed extractor for action clues."""
 
-    def __init__(self, client: genai.Client, *, batch_size: int = 10) -> None:
+    def __init__(
+        self, client: genai.Client | None = None, *, batch_size: int | None = None
+    ) -> None:
+        super().__init__()
         self._client = client
         self._batch_size = batch_size
         self._participants: dict[int, list[str]] = {}
         self._id_counters: defaultdict[int, int] = defaultdict(int)
 
     @property
-    def clue_type(self) -> str:  # noqa: D401
-        return "act"
+    def clue_type(self) -> type["ActClue"]:  # noqa: D401
+        return ActClue
 
-    def extract(self, scene_text: str, scene_id: int) -> Sequence[ActClue]:
-        return self.batch_extract([(scene_id, scene_text)])
-
-    def batch_extract(self, items: Iterable[tuple[int, str]]) -> list[ActClue]:
-        scenes = [{"scene": sid, "text": txt} for sid, txt in items]
-        return self._run_batch(scenes)
+    def configure(self, config: "PipelineConfig") -> None:
+        super().configure(config)
+        if self._client is None:
+            self._client = config.client
+        if self._batch_size is None:
+            self._batch_size = config.batch_size
+        if self._batch_size is None:
+            self._batch_size = 10
+        if self._client is None:
+            raise ValueError("ActExtractor requires a client; none provided in config")
 
     def _run_batch(self, scenes: list[dict]) -> list[ActClue]:
         outputs: list[ActClue] = []
         if not scenes:
             return outputs
 
-        chunk = self._batch_size
+        if self._client is None:
+            raise ValueError("ActExtractor must be configured with a client before use")
+
+        chunk = self._batch_size or 10
         total = (len(scenes) + chunk - 1) // chunk
 
         for i in range(0, len(scenes), chunk):
@@ -302,7 +317,7 @@ class ActExtractor(ClueExtractor):
         assigned: list[ActClue] = []
         for clue in clues:
             self._id_counters[scene_id] += 1
-            new_id = f"{self.clue_type}_{scene_id:03d}_{self._id_counters[scene_id]:04d}"
+            new_id = f"{self._clue_slug}_{scene_id:03d}_{self._id_counters[scene_id]:04d}"
             assigned.append(clue.model_copy(update={"id": new_id}))
         return assigned
 
