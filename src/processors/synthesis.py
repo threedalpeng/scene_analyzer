@@ -10,6 +10,7 @@ from google.genai import types
 
 from clues.act import ActClue, act_score, bundle_same_scene, explode_directed
 from clues.tom import ToMClue
+from framework.processor import Processor
 from framework.result import PipelineResult
 from processors.types import SynthesisResult
 from schema import LLMAdjudication
@@ -148,7 +149,18 @@ def _packs_for_pair(bag: DyadBag) -> tuple[list[str], list[str], dict, dict]:
     return dossier_lines, tom_lines, causal_json, stats
 
 
-class DyadSynthesizer:
+class DyadSynthesizer(Processor):
+    """
+    Synthesize relationship timelines for character dyads using Gemini batch analysis.
+
+    Requirements:
+        - client: Required (configure() raises ValueError if unavailable).
+        - batch_size: Optional override for batch submission size (default 10).
+
+    Input: ActClue, ToMClue
+    Output: SynthesisResult with representative acts, directed acts, and adjudicated dyads.
+    """
+
     def __init__(
         self, client: genai.Client | None = None, *, batch_size: int | None = None
     ) -> None:

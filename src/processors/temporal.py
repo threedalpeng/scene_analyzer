@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Iterable, Sequence
 
 import networkx as nx
 
+from framework.processor import Processor
 from framework.result import PipelineResult
 from processors.types import TemporalResult
 from schema import BaseClue
@@ -20,7 +21,7 @@ class Edge:
     weight: float
 
 
-class FabulaReconstructor:
+class FabulaReconstructor(Processor):
     """Reconstruct chronological scene order from heterogeneous clues."""
 
     def reconstruct(
@@ -91,7 +92,14 @@ class FabulaReconstructor:
 
 
 class TemporalReconstructor:
-    """Processor wrapper for fabula reconstruction."""
+    """
+    Reconstruct chronological scene order (fabula) from narrative order (syuzhet).
+
+    Requirements: None — relies on graph-based topological sorting only.
+
+    Input: All clues (temporal references, consequence chains) plus metadata.
+    Output: TemporalResult containing fabula_rank mapping.
+    """
 
     def __init__(self) -> None:
         self._engine = FabulaReconstructor()

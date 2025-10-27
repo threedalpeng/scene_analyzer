@@ -34,7 +34,7 @@ def main() -> None:
         "--metadata", type=Path, default=None, help="Optional fabula metadata JSON"
     )
     parser.add_argument(
-        "--batch", type=int, default=10, help="Batch size for Gemini requests"
+        "--batch", type=int, default=50, help="Batch size for Gemini requests"
     )
     args = parser.parse_args()
 

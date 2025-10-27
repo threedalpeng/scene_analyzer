@@ -10,6 +10,7 @@ from google.genai import types
 from clues.act import ActClue
 from clues.entity import EntityClue
 from clues.tom import ToMClue
+from framework.processor import Processor
 from framework.result import PipelineResult
 from processors.types import AliasingResult
 from schema import AliasGroup, AliasGroups
@@ -19,8 +20,16 @@ if TYPE_CHECKING:
     from framework.pipeline import PipelineConfig
 
 
-class AliasResolver:
-    """Resolve character aliases using entity clues and LLM assistance."""
+class AliasResolver(Processor):
+    """
+    Resolve character name aliases using entity clues and optional LLM analysis.
+
+    Requirements:
+        - client: Optional; when unavailable, falls back to entity clues only.
+
+    Input: EntityClue, ActClue, ToMClue (pair co-occurrence statistics)
+    Output: AliasingResult containing merged AliasGroups and alias map.
+    """
 
     def __init__(self, client: genai.Client | None = None) -> None:
         self._client = client
@@ -28,20 +37,6 @@ class AliasResolver:
     def configure(self, config: "PipelineConfig") -> None:
         if self._client is None:
             self._client = config.client
-
-    @staticmethod
-    def from_clues(result: PipelineResult) -> AliasGroups:
-        groups: dict[str, set[str]] = defaultdict(set)
-        for clue in result.get(EntityClue):
-            canonical = clue.name
-            groups[canonical].add(canonical)
-            groups[canonical].update(clue.aliases_in_scene)
-        return AliasGroups(
-            groups=[
-                AliasGroup(canonical=name, aliases=sorted(list(aliases)))
-                for name, aliases in groups.items()
-            ]
-        )
 
     def __call__(self, result: PipelineResult) -> AliasingResult:
         base_groups = self._extract_from_entity_clues(result)
@@ -55,6 +50,25 @@ class AliasResolver:
         final_groups = AliasGroups(groups=[*base_groups.groups, *llm_groups.groups])
         alias_map = self._build_alias_map(final_groups)
         return AliasingResult(alias_groups=final_groups, alias_map=alias_map)
+
+    @staticmethod
+    def from_clues(result: PipelineResult) -> AliasGroups:
+        """
+        Derive alias groups from entity clues only.
+
+        Useful for tests or when no client is available.
+        """
+        groups: dict[str, set[str]] = defaultdict(set)
+        for clue in result.get(EntityClue):
+            canonical = clue.name
+            groups[canonical].add(canonical)
+            groups[canonical].update(clue.aliases_in_scene)
+        return AliasGroups(
+            groups=[
+                AliasGroup(canonical=name, aliases=sorted(list(aliases)))
+                for name, aliases in groups.items()
+            ]
+        )
 
     @staticmethod
     def _extract_from_entity_clues(result: PipelineResult) -> AliasGroups:
@@ -78,7 +92,7 @@ class AliasResolver:
     def _collect_appearances(
         self, result: PipelineResult
     ) -> tuple[list[str], dict[str, list[int]]]:
-        """Collect name co-occurrences from Act/ToM clues"""
+        """Collect name co-occurrences from Act/ToM clues."""
         unique_names: set[str] = set()
         appearances: dict[str, set[int]] = defaultdict(set)
 
@@ -93,7 +107,7 @@ class AliasResolver:
     def _merge_via_llm(
         self, unique_names: list[str], appearances: dict[str, list[int]]
     ) -> AliasGroups:
-        """Merge aliases via LLM co-occurrence analysis"""
+        """Merge aliases via LLM co-occurrence analysis."""
         assert self._client
 
         resp = self._client.models.generate_content(
@@ -120,7 +134,7 @@ class AliasResolver:
 
     @staticmethod
     def _build_alias_map(groups: AliasGroups) -> dict[str, str]:
-        """Build {alias: canonical} mapping"""
+        """Build {alias: canonical} mapping."""
         mp: dict[str, str] = {}
         for g in groups.groups:
             for a in g.aliases:
@@ -149,7 +163,7 @@ class AliasResolver:
 
 
 def alias_name(n: str, amap: dict[str, str]) -> str:
-    """Apply alias map to a single name"""
+    """Apply alias map to a single name."""
     low = n.lower()
     for k, v in amap.items():
         if low == k.lower():
@@ -158,7 +172,7 @@ def alias_name(n: str, amap: dict[str, str]) -> str:
 
 
 def alias_pair(p: tuple[str, str], amap: dict[str, str]) -> tuple[str, str]:
-    """Apply alias map to a pair"""
+    """Apply alias map to a pair."""
     return norm_pair(alias_name(p[0], amap), alias_name(p[1], amap))
 
 

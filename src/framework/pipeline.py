@@ -2,18 +2,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence, Type
+from typing import Any, Mapping, Sequence, Type
 
 from google import genai
 
 from framework.base import ClueExtractor
 from framework.batch import BatchExtractor, CombinedBatchExtractor
+from framework.processor import Processor
 from framework.registry import ClueRegistry
 from framework.result import PipelineResult
 from framework.validation import ValidationContext, ValidationPipeline
 from schema import BaseClue, ValidationResult
-
-Processor = Callable[[PipelineResult], Any]
 
 
 @dataclass(slots=True)
@@ -25,43 +24,19 @@ class PipelineConfig:
     checkpoint_enabled: bool = False
     output_dir: Path | None = None
 
-    def as_mapping(self) -> Mapping[str, Any]:
-        return {
-            "client": self.client,
-            "batch_size": self.batch_size,
-            "validate": self.validate,
-            "strict_validation": self.strict_validation,
-            "checkpoint_enabled": self.checkpoint_enabled,
-            "output_dir": self.output_dir,
-        }
-
 
 class Pipeline:
     def __init__(
         self,
         config: PipelineConfig | None = None,
-        *,
-        client: genai.Client | None = None,
-        batch_size: int = 50,
-        validate: bool = True,
-        strict_validation: bool = False,
-        checkpoint_enabled: bool = False,
-        output_dir: Path | None = None,
     ) -> None:
-        if isinstance(config, PipelineConfig):
-            base_config = config
-        else:
-            base_config = PipelineConfig(
-                client=client,
-                batch_size=batch_size,
-                validate=validate,
-                strict_validation=strict_validation,
-                checkpoint_enabled=checkpoint_enabled,
-                output_dir=output_dir,
-            )
-        self.config = base_config
+        self.config = config or PipelineConfig()
         self._extractors: list[ClueExtractor] = []
         self._processors: list[Processor] = []
+
+    ##################
+    ### Public API ###
+    ##################
 
     def extract(
         self,
@@ -159,15 +134,11 @@ class Pipeline:
 
     def _configure_extractors(self) -> None:
         for extractor in self._extractors:
-            configure = getattr(extractor, "configure", None)
-            if callable(configure):
-                configure(self.config)
+            extractor.configure(self.config)
 
     def _configure_processors(self) -> None:
         for processor in self._processors:
-            configure = getattr(processor, "configure", None)
-            if callable(configure):
-                configure(self.config)
+            processor.configure(self.config)
 
     def _instantiate_extractor(
         self,
@@ -187,9 +158,12 @@ class Pipeline:
         errors: list[str] = []
         for clue, records in validations:
             for record in records:
-                if not getattr(record, "passed", True):
+                if not record.passed:
                     errors.append(
-                        f"{clue.id} ({clue.clue_type}) failed {record.level}: {record.errors}"
+                        f"Scene {clue.scene} | {clue.id} ({clue.clue_type}) "
+                        f"failed {record.level}: {record.errors}"
                     )
+
         if errors:
-            raise ValueError("Validation failed:\n" + "\n".join(errors))
+            summary = f"Validation failed: {len(errors)} error(s) found\n"
+            raise ValueError(summary + "\n".join(errors))
