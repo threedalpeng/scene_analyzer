@@ -48,6 +48,16 @@ class BaseClue(BaseModel):
         return v if len(v) <= 200 else v[:200]
 
 
+class EvidenceClippingMixin(BaseModel):
+    """Mixin that enforces evidence clipping and trimming."""
+
+    @field_validator("evidence")
+    @classmethod
+    def _clip_api_evidence(cls, value: str) -> str:
+        value = value.strip()
+        return value if len(value) <= 200 else value[:200]
+
+
 class PairClue(BaseClue):
     pair: tuple[str, str]
 

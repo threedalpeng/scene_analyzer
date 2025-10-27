@@ -3,13 +3,13 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any, Literal, Mapping, Sequence, Type
 
-from google.genai import types
-from pydantic import BaseModel, Field, computed_field, field_validator
+from pydantic import BaseModel, Field, computed_field
 
 from framework.base import ClueValidator
 from framework.batch import BatchExtractor
 from schema import (
     Durability,
+    EvidenceClippingMixin,
     GoalAlignment,
     PairClue,
     Salience,
@@ -72,120 +72,15 @@ def bundle_same_scene(acts: Sequence["ActClue"]) -> list["ActClue"]:
     return representatives
 
 
-ACT_PROMPT_RULES = """
-CORE CONCEPTS:
-
-Action: An observable behavior where one character (actor) does something that 
-affects another character (target). Must be explicitly described in text.
-
-Valence: The fundamental tone of the action
-  - positive: Helps, cooperates, supports, befriends
-  - negative: Harms, opposes, threatens, attacks
-
-Pattern: Your own descriptive label for the action type
-  - Examples: "rescues", "betrays", "shares_intel", "threatens", "defends"
-  - Use specific, domain-appropriate terminology
-  - No fixed list—describe what you observe
-
-Axes: Multi-dimensional rating
-  - salience: low/medium/high (how noticeable)
-  - stakes: minor/moderate/major (consequences)
-  - durability: momentary/temporary/persistent
-  - volition: voluntary/coerced/accidental
-  - goal_alignment: aligned/orthogonal/opposed
-  - consequence_refs: [] (scene numbers impacted later)
-
-Durability = "persistent" if any of:
-  - Institutional pledge or order
-  - Affiliation change (joining/leaving organization)
-  - Death
-  - Identity reveal
-  - Legal verdict
-  - Irreversible destruction of core asset
-
-HARD RULES:
-
-1. Evidence (MANDATORY): Direct quote from scene text (≤200 chars)
-   - Must be substring from input
-   - NO inference, NO "seems to", NO implied actions
-
-2. Direction (CRITICAL): Every action has clear actor → target
-   - pair: [actor_name, target_name] (exactly 2 names)
-   - If multiple actors or targets, create separate action entries
-   - If you cannot confidently identify BOTH sides, OMIT
-
-3. ID Format (STRICT): "act_{scene:03d}_{index:04d}"
-   - scene: zero-padded scene number
-   - index: starts at 1, increments per action
-
-4. Consequence_refs: List scene numbers this action will impact
-   - Only if explicitly stated or strongly implied by text
-   - Use [] if none
-
-OUTPUT SCHEMA:
-
-{
-  "participants": [list of all person names in scene],
-  "act_clues": [
-    {
-      "id": "act_005_0001",
-      "scene": 5,
-      "pair": ["ActorName", "TargetName"],
-      "clue_type": "act",
-      "evidence": "direct quote ≤200 chars",
-      "actors": ["ActorName"],
-      "targets": ["TargetName"],
-      "valence": "positive|negative",
-      "pattern": "your_descriptive_label",
-      "axes": {
-        "salience": "low|medium|high",
-        "stakes": "minor|moderate|major",
-        "durability": "momentary|temporary|persistent",
-        "volition": "voluntary|coerced|accidental",
-        "goal_alignment": "aligned|orthogonal|opposed",
-        "consequence_refs": [7, 9]
-      }
-    }
-  ]
-}
-
-QUALITY GUARDS:
-- Keep evidence ≤200 chars (hard clip)
-- Omit any action you're not fully confident about
-- NO assumptions about camera work or unstated plot devices
-- Names must match exactly as written in scene text
-""".strip()
-
-ACT_PROMPT_SECTION = f"## ACT CLUES\n{ACT_PROMPT_RULES}"
-
-ACT_SYSTEM_PROMPT = (
-    "You extract structured relationship ACTION clues from a single scene transcript.\n"
-    "Return ONLY JSON that satisfies the provided response schema exactly.\n\n"
-    f"{ACT_PROMPT_RULES}"
-)
-
-
-def _act_user_prompt(scene_id: int, text: str) -> str:
-    return f"""SCENE_ID: {scene_id}\nTEXT:\n{text}\n\nExtract only the required action clues.""".strip()
-
-
-class _ActExtractionPayload(BaseModel):
-    participants: list[str] = Field(default_factory=list)
-    act_clues: list[ActClueAPI] = Field(default_factory=list)
-
-    def to_internal(self) -> tuple[list[str], list[ActClue]]:
-        return self.participants, [a.to_internal() for a in self.act_clues]
-
-
 class ActValidator(ClueValidator):
-    def validate_semantic(self, clue: ActClue) -> ValidationResult:
+    def validate_semantic(self, clue: "ActClue") -> ValidationResult:
         warnings: list[str] = []
         if clue.axes.stakes == "major" and not clue.axes.consequence_refs:
             warnings.append("major stakes usually reference downstream scenes")
         return ValidationResult.ok(level="semantic", warnings=warnings)
 
     def validate_coherence(
-        self, clue: ActClue, context: Mapping[str, object] | None = None
+        self, clue: "ActClue", context: Mapping[str, object] | None = None
     ) -> ValidationResult | None:
         if context is None:
             return None
@@ -215,49 +110,58 @@ class ActExtractor(BatchExtractor):
         if self._client is None:
             self._client = config.client
         if self._batch_size is None:
-            self._batch_size = config.batch_size
-        if self._batch_size is None:
-            self._batch_size = 50
+            self._batch_size = config.batch_size or self.batch_size
         if self._client is None:
             raise ValueError("ActExtractor requires a client; none provided in config")
 
-    def _build_inline_requests(
-        self, scenes: list[dict]
-    ) -> list[types.InlinedRequestDict]:
-        requests: list[types.InlinedRequestDict] = []
-        for item in scenes:
-            sid = int(item["scene"])
-            text = str(item["text"])
-            requests.append(
-                types.InlinedRequestDict(
-                    contents=[
-                        {
-                            "role": "user",
-                            "parts": [{"text": _act_user_prompt(sid, text)}],
-                        }
-                    ],
-                    config=types.GenerateContentConfigDict(
-                        system_instruction=ACT_SYSTEM_PROMPT,
-                        response_schema=_ActExtractionPayload,
-                        response_mime_type="application/json",
-                    ),
-                )
-            )
-        return requests
+    def get_clue_specification(self) -> dict:
+        return {
+            "clue_type": "act",
+            "display_name": "ACT CLUES",
+            "purpose": "Observable actions where one character (actor) affects another character (target).",
+            "concepts": [
+                ("Action", "Explicit behavior described in the scene where an actor affects a target."),
+                (
+                    "Valence",
+                    "positive (helps, cooperates, supports) or negative (harms, opposes, threatens).",
+                ),
+                (
+                    "Pattern",
+                    "Descriptive label for the action type (e.g., 'rescues', 'betrays', 'shares_intel').",
+                ),
+                (
+                    "Axes",
+                    "Ratings for salience, stakes, durability, volition, goal_alignment, and consequence_refs.",
+                ),
+            ],
+            "special_rules": [
+                "Direction is critical: every action must clearly identify actor → target.",
+                "If multiple actors or targets exist, create separate action entries for each combination.",
+                "Mark durability as 'persistent' for irreversible outcomes (pledge, affiliation change, death, etc.).",
+                "List consequence_refs only when the downstream impact is explicitly stated or strongly implied.",
+                "Omit the clue if you cannot confidently identify both actor and target from explicit text.",
+            ],
+            "schema_model": ActClueAPI,
+        }
 
     def _parse_response(
         self, raw_payload: Any, scene_id: int
-    ) -> tuple[list[str], list[ActClue]]:
-        payload = parse_model(_ActExtractionPayload, raw_payload)
-        return payload.to_internal()
+    ) -> tuple[list[str], list["ActClue"]]:
+        schema_model = self._build_response_schema()
+        payload_model = parse_model(schema_model, raw_payload)
+        participants = list(getattr(payload_model, "participants", []))
+        act_items = getattr(payload_model, "act_clues", [])
 
-    def get_prompt_section(self) -> str:
-        return ACT_PROMPT_SECTION
+        clues: list[ActClue] = []
+        for item in act_items:
+            clue_api = item if isinstance(item, ActClueAPI) else ActClueAPI.model_validate(item)
+            clues.append(clue_api.to_internal())
+        return participants, clues
 
     def get_api_model(self) -> Type[BaseModel]:
         return ActClueAPI
 
-    def score(self, clue: ActClue) -> float:
+    def score(self, clue: "ActClue") -> float:
         return float(act_score(clue))
 
     def validator(self) -> ClueValidator:
@@ -295,7 +199,7 @@ class ActClue(PairClue):
         return self.pattern
 
 
-class ActClueAPI(BaseModel):
+class ActClueAPI(EvidenceClippingMixin):
     id: str | None = None
     scene: int
     pair: list[str] = Field(min_length=2, max_length=2)
@@ -306,12 +210,6 @@ class ActClueAPI(BaseModel):
     valence: ValenceCore
     pattern: str
     axes: Axes
-
-    @field_validator("evidence")
-    @classmethod
-    def _clip_evidence(cls, v: str) -> str:
-        v = v.strip()
-        return v if len(v) <= 200 else v[:200]
 
     def to_internal(self) -> ActClue:
         data = self.model_dump()

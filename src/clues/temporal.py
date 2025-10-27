@@ -1,76 +1,25 @@
 from __future__ import annotations
 
-from typing import Any, Literal, Mapping, TYPE_CHECKING, Type
+from typing import TYPE_CHECKING, Any, Literal, Mapping, Type
 
-from google.genai import types
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 from framework.base import ClueValidator
 from framework.batch import BatchExtractor
-from schema import BaseClue, ValidationResult
+from schema import BaseClue, EvidenceClippingMixin, ValidationResult
 from utils import parse_model
 
 if TYPE_CHECKING:
     from framework.pipeline import PipelineConfig
 
 
-TEMPORAL_PROMPT_RULES = """
-PURPOSE: Help reconstruct chronological order (Fabula) from presentation order (Syuzhet).
-
-CORE CONCEPTS:
-
-References_scenes: Which past scenes does THIS scene reference or continue?
-Time_offset: Approximate time difference from narrative present (in days)
-Is_flashback: True if the scene is presented out of chronological order.
-
-HARD RULES:
-- Evidence (≤200 chars) must be direct quote indicating the temporal relationship.
-- Use ONLY explicit textual evidence: temporal markers, dialogue references, SDH cues.
-- ID Format: "temporal_{scene:03d}_{index:04d}".
-
-OUTPUT SCHEMA:
-{
-  "temporal_clues": [
-    {
-      "id": "temporal_005_0001",
-      "scene": 5,
-      "clue_type": "temporal",
-      "references_scenes": [1, 2],
-      "time_offset": -1095,
-      "is_flashback": true,
-      "evidence": "direct quote"
-    }
-  ]
-}
-""".strip()
-
-TEMPORAL_PROMPT_SECTION = f"## TEMPORAL CLUES\n{TEMPORAL_PROMPT_RULES}"
-
-TEMPORAL_SYSTEM_PROMPT = (
-    "You extract TEMPORAL RELATIONSHIPS between scenes from scene text.\n"
-    "Return ONLY JSON that satisfies the provided response schema exactly.\n\n"
-    f"{TEMPORAL_PROMPT_RULES}"
-)
-
-
-def _temporal_user_prompt(scene_id: int, text: str) -> str:
-    return f"""SCENE_ID: {scene_id}\nTEXT:\n{text}\n\nExtract explicit temporal clues only.""".strip()
-
-
-class _TemporalExtractionPayload(BaseModel):
-    temporal_clues: list[TemporalClueAPI] = Field(default_factory=list)
-
-    def to_internal(self) -> tuple[list[str], list[TemporalClue]]:
-        return [], [c.to_internal() for c in self.temporal_clues]
-
-
 class TemporalValidator(ClueValidator):
-    def validate_semantic(self, clue: TemporalClue) -> ValidationResult:
+    def validate_semantic(self, clue: "TemporalClue") -> ValidationResult:
         _ = clue
         return ValidationResult.ok(level="semantic")
 
     def validate_coherence(
-        self, clue: TemporalClue, context: Mapping[str, object] | None = None
+        self, clue: "TemporalClue", context: Mapping[str, object] | None = None
     ) -> ValidationResult | None:
         if context is None:
             return None
@@ -101,51 +50,57 @@ class TemporalExtractor(BatchExtractor):
         if self._client is None:
             self._client = config.client
         if self._batch_size is None:
-            self._batch_size = config.batch_size
-        if self._batch_size is None:
-            self._batch_size = 50
+            self._batch_size = config.batch_size or self.batch_size
         if self._client is None:
             raise ValueError(
                 "TemporalExtractor requires a client; none provided in config"
             )
 
-    def _build_inline_requests(
-        self, scenes: list[dict]
-    ) -> list[types.InlinedRequestDict]:
-        requests: list[types.InlinedRequestDict] = []
-        for item in scenes:
-            sid = int(item["scene"])
-            text = str(item["text"])
-            requests.append(
-                types.InlinedRequestDict(
-                    contents=[
-                        {
-                            "role": "user",
-                            "parts": [{"text": _temporal_user_prompt(sid, text)}],
-                        }
-                    ],
-                    config=types.GenerateContentConfigDict(
-                        system_instruction=TEMPORAL_SYSTEM_PROMPT,
-                        response_schema=_TemporalExtractionPayload,
-                        response_mime_type="application/json",
-                    ),
-                )
-            )
-        return requests
+    def get_clue_specification(self) -> dict:
+        return {
+            "clue_type": "temporal",
+            "display_name": "TEMPORAL CLUES",
+            "purpose": "Chronological relationships between scenes to reconstruct fabula from syuzhet.",
+            "concepts": [
+                (
+                    "References_scenes",
+                    "Which earlier scenes this scene explicitly references or continues.",
+                ),
+                (
+                    "Time_offset",
+                    "Approximate time delta from the narrative present (days, negative for past).",
+                ),
+                ("Is_flashback", "True when the scene is presented out of chronological order."),
+            ],
+            "special_rules": [
+                "Use only explicit temporal markers (timestamps, dialogue references, SDH cues).",
+                "If uncertain about the chronological relationship, omit the clue.",
+            ],
+            "schema_model": TemporalClueAPI,
+        }
 
     def _parse_response(
         self, raw_payload: Any, scene_id: int
-    ) -> tuple[list[str], list[TemporalClue]]:
-        payload = parse_model(_TemporalExtractionPayload, raw_payload)
-        return payload.to_internal()
+    ) -> tuple[list[str], list["TemporalClue"]]:
+        schema_model = self._build_response_schema()
+        payload_model = parse_model(schema_model, raw_payload)
+        participants = list(getattr(payload_model, "participants", []))
+        temporal_items = getattr(payload_model, "temporal_clues", [])
 
-    def get_prompt_section(self) -> str:
-        return TEMPORAL_PROMPT_SECTION
+        clues: list[TemporalClue] = []
+        for item in temporal_items:
+            clue_api = (
+                item
+                if isinstance(item, TemporalClueAPI)
+                else TemporalClueAPI.model_validate(item)
+            )
+            clues.append(clue_api.to_internal())
+        return participants, clues
 
     def get_api_model(self) -> Type[BaseModel]:
         return TemporalClueAPI
 
-    def score(self, clue: TemporalClue) -> float:
+    def score(self, clue: "TemporalClue") -> float:
         _ = clue
         return 0.0
 
@@ -160,7 +115,7 @@ class TemporalClue(BaseClue):
     is_flashback: bool
 
 
-class TemporalClueAPI(BaseModel):
+class TemporalClueAPI(EvidenceClippingMixin):
     id: str | None = None
     scene: int
     clue_type: Literal["temporal"] = "temporal"
@@ -168,12 +123,6 @@ class TemporalClueAPI(BaseModel):
     references_scenes: list[int] = Field(default_factory=list)
     time_offset: int | None = None
     is_flashback: bool
-
-    @field_validator("evidence")
-    @classmethod
-    def _clip_evidence(cls, v: str) -> str:
-        v = v.strip()
-        return v if len(v) <= 200 else v[:200]
 
     def to_internal(self) -> TemporalClue:
         data = self.model_dump()

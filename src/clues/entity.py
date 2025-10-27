@@ -2,69 +2,19 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Literal, Mapping, Type
 
-from google.genai import types
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 from framework.base import ClueValidator
 from framework.batch import BatchExtractor
-from schema import BaseClue, ValidationResult
+from schema import BaseClue, EvidenceClippingMixin, ValidationResult
 from utils import parse_model
 
 if TYPE_CHECKING:
     from framework.pipeline import PipelineConfig
 
 
-ENTITY_PROMPT_RULES = """
-PURPOSE: Help resolve multiple names referring to the same person.
-
-CORE CONCEPTS:
-- name: primary name used for the character in this scene
-- aliases_in_scene: other names/titles explicitly referring to the same person
-
-HARD RULES:
-1. Evidence must be a direct quote (≤200 chars) showing the alias relationship.
-2. Extract ONLY if both names appear in the scene and clearly refer to the same person.
-3. ID format: "entity_{scene:03d}_{index:04d}".
-
-OUTPUT SCHEMA:
-{
-  "participants": [list of person names],
-  "entity_clues": [
-    {
-      "id": "entity_005_0001",
-      "scene": 5,
-      "clue_type": "entity",
-      "name": "Primary Name",
-      "aliases_in_scene": ["Alias"],
-      "evidence": "direct quote"
-    }
-  ]
-}
-""".strip()
-
-ENTITY_PROMPT_SECTION = f"## ENTITY CLUES\n{ENTITY_PROMPT_RULES}"
-
-ENTITY_SYSTEM_PROMPT = (
-    "You extract CHARACTER IDENTITIES and ALIAS relationships from scene text.\n"
-    "Return ONLY JSON that satisfies the provided response schema exactly.\n\n"
-    f"{ENTITY_PROMPT_RULES}"
-)
-
-
-def _entity_user_prompt(scene_id: int, text: str) -> str:
-    return f"""SCENE_ID: {scene_id}\nTEXT:\n{text}\n\nExtract only explicit alias relationships.""".strip()
-
-
-class _EntityExtractionPayload(BaseModel):
-    participants: list[str] = Field(default_factory=list)
-    entity_clues: list[EntityClueAPI] = Field(default_factory=list)
-
-    def to_internal(self) -> tuple[list[str], list[EntityClue]]:
-        return self.participants, [c.to_internal() for c in self.entity_clues]
-
-
 class EntityValidator(ClueValidator):
-    def validate_semantic(self, clue: EntityClue) -> ValidationResult:
+    def validate_semantic(self, clue: "EntityClue") -> ValidationResult:
         if not clue.aliases_in_scene:
             return ValidationResult.fail(
                 level="semantic", errors=["alias list must not be empty"]
@@ -72,7 +22,7 @@ class EntityValidator(ClueValidator):
         return ValidationResult.ok(level="semantic")
 
     def validate_coherence(
-        self, clue: EntityClue, context: Mapping[str, object] | None = None
+        self, clue: "EntityClue", context: Mapping[str, object] | None = None
     ) -> ValidationResult | None:
         if clue.aliases_in_scene:
             return None
@@ -94,51 +44,51 @@ class EntityExtractor(BatchExtractor):
         if self._client is None:
             self._client = config.client
         if self._batch_size is None:
-            self._batch_size = config.batch_size
-        if self._batch_size is None:
-            self._batch_size = 50
+            self._batch_size = config.batch_size or self.batch_size
         if self._client is None:
             raise ValueError(
                 "EntityExtractor requires a client; none provided in config"
             )
 
-    def _build_inline_requests(
-        self, scenes: list[dict]
-    ) -> list[types.InlinedRequestDict]:
-        requests: list[types.InlinedRequestDict] = []
-        for item in scenes:
-            sid = int(item["scene"])
-            text = str(item["text"])
-            requests.append(
-                types.InlinedRequestDict(
-                    contents=[
-                        {
-                            "role": "user",
-                            "parts": [{"text": _entity_user_prompt(sid, text)}],
-                        }
-                    ],
-                    config=types.GenerateContentConfigDict(
-                        system_instruction=ENTITY_SYSTEM_PROMPT,
-                        response_schema=_EntityExtractionPayload,
-                        response_mime_type="application/json",
-                    ),
-                )
-            )
-        return requests
+    def get_clue_specification(self) -> dict:
+        return {
+            "clue_type": "entity",
+            "display_name": "ENTITY ALIAS CLUES",
+            "purpose": "Resolve explicit alias relationships for characters mentioned in the scene.",
+            "concepts": [
+                ("Name", "Primary name used for the character in this scene."),
+                (
+                    "Aliases_in_scene",
+                    "Other names or titles explicitly referring to the same person within this scene.",
+                ),
+            ],
+            "special_rules": [
+                "Only capture aliases when both names appear in the scene and refer to the same person.",
+                "Evidence must quote the text that links the alias to the canonical name.",
+            ],
+            "schema_model": EntityClueAPI,
+        }
 
     def _parse_response(
         self, raw_payload: Any, scene_id: int
-    ) -> tuple[list[str], list[EntityClue]]:
-        payload = parse_model(_EntityExtractionPayload, raw_payload)
-        return payload.to_internal()
+    ) -> tuple[list[str], list["EntityClue"]]:
+        schema_model = self._build_response_schema()
+        payload_model = parse_model(schema_model, raw_payload)
+        participants = list(getattr(payload_model, "participants", []))
+        entity_items = getattr(payload_model, "entity_clues", [])
 
-    def get_prompt_section(self) -> str:
-        return ENTITY_PROMPT_SECTION
+        clues: list[EntityClue] = []
+        for item in entity_items:
+            clue_api = (
+                item if isinstance(item, EntityClueAPI) else EntityClueAPI.model_validate(item)
+            )
+            clues.append(clue_api.to_internal())
+        return participants, clues
 
     def get_api_model(self) -> Type[BaseModel]:
         return EntityClueAPI
 
-    def score(self, clue: EntityClue) -> float:
+    def score(self, clue: "EntityClue") -> float:
         _ = clue
         return 0.0
 
@@ -152,19 +102,13 @@ class EntityClue(BaseClue):
     aliases_in_scene: list[str] = Field(default_factory=list)
 
 
-class EntityClueAPI(BaseModel):
+class EntityClueAPI(EvidenceClippingMixin):
     id: str | None = None
     scene: int
     clue_type: Literal["entity"] = "entity"
     evidence: str
     name: str
     aliases_in_scene: list[str] = Field(default_factory=list)
-
-    @field_validator("evidence")
-    @classmethod
-    def _clip_evidence(cls, v: str) -> str:
-        v = v.strip()
-        return v if len(v) <= 200 else v[:200]
 
     def to_internal(self) -> EntityClue:
         data = self.model_dump()

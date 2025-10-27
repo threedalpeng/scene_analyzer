@@ -1,105 +1,31 @@
 from __future__ import annotations
 
-from typing import Any, Literal, TYPE_CHECKING, Type
+from typing import TYPE_CHECKING, Any, Literal, Mapping, Type
 
-from google.genai import types
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 from framework.base import ClueValidator
 from framework.batch import BatchExtractor
-from schema import PairClue, ValidationResult
+from schema import EvidenceClippingMixin, PairClue, ValidationResult
 from utils import parse_model
 
 if TYPE_CHECKING:
     from framework.pipeline import PipelineConfig
 
 
-TOM_PROMPT_RULES = """
-CORE CONCEPTS:
-
-Theory of Mind: Mental states (beliefs, feelings, intentions, desires) that 
-one character has ABOUT another character. Must be explicitly signaled.
-
-ToM Kinds:
-  - BelievesAbout: What A thinks about B
-  - FeelsTowards: What emotional state A has toward B
-  - IntendsTo: What A plans to do regarding B
-  - DesiresFor: What A wants from/for B
-
-Claim: Short, literal statement of the mental state
-  - Example: "Alice believes Bob stole the documents"
-  - NOT: "Alice seems suspicious of Bob"
-
-HARD RULES:
-
-1. Evidence (MANDATORY): Direct quote from scene (≤200 chars)
-   - Dialogue expressing belief or intention
-   - Narration describing mental state
-  - Described behavior that explicitly indicates the state
-
-2. Explicit Signal Required:
-   - Must be stated in dialogue, narration, or SDH cues
-   - NO inference from context alone
-   - If target is ambiguous, OMIT the entry
-
-3. Direction (pair): [thinker_name, target_name]
-   - Thinker: Who has the mental state
-   - Target: Who the mental state is about
-   - Exactly 2 names required
-
-4. ID Format: "tom_{scene:03d}_{index:04d}"
-
-OUTPUT SCHEMA:
-
-{
-  "participants": [list of all person names],
-  "tom_clues": [
-    {
-      "id": "tom_005_0001",
-      "scene": 5,
-      "pair": ["Thinker", "Target"],
-      "clue_type": "tom",
-      "evidence": "direct quote ≤200 chars",
-      "kind": "BelievesAbout|FeelsTowards|IntendsTo|DesiresFor",
-      "claim": "short literal statement"
-    }
-  ]
-}
-
-QUALITY GUARDS:
-- Keep evidence ≤200 chars
-- Omit any clue you're not fully confident about
-- Names must match the scene text exactly
-""".strip()
-
-TOM_PROMPT_SECTION = f"## TOM CLUES\n{TOM_PROMPT_RULES}"
-
-TOM_SYSTEM_PROMPT = (
-    "You extract structured THEORY OF MIND clues from a single scene transcript.\n"
-    "Return ONLY JSON that satisfies the provided response schema exactly.\n\n"
-    f"{TOM_PROMPT_RULES}"
-)
-
-
-def _tom_user_prompt(scene_id: int, text: str) -> str:
-    return f"""SCENE_ID: {scene_id}\nTEXT:\n{text}\n\nExtract only the required theory-of-mind clues.""".strip()
-
-
-class _ToMExtractionPayload(BaseModel):
-    participants: list[str] = Field(default_factory=list)
-    tom_clues: list[ToMClueAPI] = Field(default_factory=list)
-
-    def to_internal(self) -> tuple[list[str], list[ToMClue]]:
-        return self.participants, [c.to_internal() for c in self.tom_clues]
-
-
 class ToMValidator(ClueValidator):
-    def validate_semantic(self, clue: ToMClue) -> ValidationResult:
+    def validate_semantic(self, clue: "ToMClue") -> ValidationResult:
         if not clue.claim:
             return ValidationResult.fail(
                 level="semantic", errors=["claim must be non-empty"]
             )
         return ValidationResult.ok(level="semantic")
+
+    def validate_coherence(
+        self, clue: "ToMClue", context: Mapping[str, object] | None = None
+    ) -> ValidationResult | None:
+        _ = clue, context
+        return None
 
 
 class ToMExtractor(BatchExtractor):
@@ -114,44 +40,42 @@ class ToMExtractor(BatchExtractor):
         if self._client is None:
             self._client = config.client
         if self._batch_size is None:
-            self._batch_size = config.batch_size
-        if self._batch_size is None:
-            self._batch_size = 50
+            self._batch_size = config.batch_size or self.batch_size
         if self._client is None:
             raise ValueError("ToMExtractor requires a client; none provided in config")
 
-    def _build_inline_requests(
-        self, scenes: list[dict]
-    ) -> list[types.InlinedRequestDict]:
-        requests: list[types.InlinedRequestDict] = []
-        for item in scenes:
-            sid = int(item["scene"])
-            text = str(item["text"])
-            requests.append(
-                types.InlinedRequestDict(
-                    contents=[
-                        {
-                            "role": "user",
-                            "parts": [{"text": _tom_user_prompt(sid, text)}],
-                        }
-                    ],
-                    config=types.GenerateContentConfigDict(
-                        system_instruction=TOM_SYSTEM_PROMPT,
-                        response_schema=_ToMExtractionPayload,
-                        response_mime_type="application/json",
-                    ),
-                )
-            )
-        return requests
+    def get_clue_specification(self) -> dict:
+        return {
+            "clue_type": "tom",
+            "display_name": "THEORY-OF-MIND CLUES",
+            "purpose": "Mental states that one character holds ABOUT another character.",
+            "concepts": [
+                ("BelievesAbout", "What character A believes regarding character B."),
+                ("FeelsTowards", "Emotional stance character A has towards character B."),
+                ("IntendsTo", "What character A plans to do regarding character B."),
+                ("DesiresFor", "What character A wants from or for character B."),
+            ],
+            "special_rules": [
+                "Signals must be explicit in dialogue, narration, or SDH cues—never inferred.",
+                "Pairs must be exact character names (thinker, target).",
+                "Omit entries if the target is ambiguous or only implied.",
+            ],
+            "schema_model": ToMClueAPI,
+        }
 
     def _parse_response(
         self, raw_payload: Any, scene_id: int
-    ) -> tuple[list[str], list[ToMClue]]:
-        payload = parse_model(_ToMExtractionPayload, raw_payload)
-        return payload.to_internal()
+    ) -> tuple[list[str], list["ToMClue"]]:
+        schema_model = self._build_response_schema()
+        payload_model = parse_model(schema_model, raw_payload)
+        participants = list(getattr(payload_model, "participants", []))
+        tom_items = getattr(payload_model, "tom_clues", [])
 
-    def get_prompt_section(self) -> str:
-        return TOM_PROMPT_SECTION
+        clues: list[ToMClue] = []
+        for item in tom_items:
+            clue_api = item if isinstance(item, ToMClueAPI) else ToMClueAPI.model_validate(item)
+            clues.append(clue_api.to_internal())
+        return participants, clues
 
     def get_api_model(self) -> Type[BaseModel]:
         return ToMClueAPI
@@ -159,7 +83,7 @@ class ToMExtractor(BatchExtractor):
     def validator(self) -> ClueValidator:
         return ToMValidator()
 
-    def score(self, clue: ToMClue) -> float:
+    def score(self, clue: "ToMClue") -> float:
         _ = clue
         return 0.0
 
@@ -173,7 +97,7 @@ class ToMClue(PairClue):
     claim: str
 
 
-class ToMClueAPI(BaseModel):
+class ToMClueAPI(EvidenceClippingMixin):
     id: str | None = None
     scene: int
     pair: list[str] = Field(min_length=2, max_length=2)
@@ -181,12 +105,6 @@ class ToMClueAPI(BaseModel):
     evidence: str
     kind: ToMKind
     claim: str
-
-    @field_validator("evidence")
-    @classmethod
-    def _clip_evidence(cls, v: str) -> str:
-        v = v.strip()
-        return v if len(v) <= 200 else v[:200]
 
     def to_internal(self) -> ToMClue:
         data = self.model_dump()

@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, ValidationError, create_model
 
 from framework.base import ClueExtractor, ClueT
 from framework.pipeline import PipelineConfig
+from framework.prompts import build_system_prompt
 from schema import BaseClue
 from utils import log_status, parse_model
 
@@ -26,12 +27,8 @@ class BatchExtractor(ClueExtractor[ClueT], ABC):
         self._client: genai.Client | None = None
         self._batch_size: int | None = None
         self._id_counters: defaultdict[int, int] = defaultdict(int)
-
-    @abstractmethod
-    def _build_inline_requests(
-        self, scenes: list[dict]
-    ) -> list[types.InlinedRequestDict]:
-        """Build Gemini API requests for a batch of scenes."""
+        self._response_schema_single: type[BaseModel] | None = None
+        self._system_prompt_single: str | None = None
 
     @abstractmethod
     def _parse_response(
@@ -40,8 +37,8 @@ class BatchExtractor(ClueExtractor[ClueT], ABC):
         """Parse API response into (participants, clues)."""
 
     @abstractmethod
-    def get_prompt_section(self) -> str:
-        """Return textual prompt instructions used in combined extraction."""
+    def get_clue_specification(self) -> dict:
+        """Return configuration describing this clue extractor."""
 
     @abstractmethod
     def get_api_model(self) -> Type[BaseModel]:
@@ -56,6 +53,35 @@ class BatchExtractor(ClueExtractor[ClueT], ABC):
     def batch_extract(self, items: Iterable[tuple[int, str]]) -> Sequence[ClueT]:
         scenes = [{"scene": sid, "text": txt} for sid, txt in items]
         return self._run_batch(scenes)
+
+    def _build_inline_requests(
+        self, scenes: list[dict]
+    ) -> list[types.InlinedRequestDict]:
+        """Build Gemini API requests for a batch of scenes."""
+
+        system_prompt = self._build_system_prompt_single()
+        schema = self._build_response_schema()
+
+        requests: list[types.InlinedRequestDict] = []
+        for item in scenes:
+            sid = int(item["scene"])
+            text = str(item["text"])
+            requests.append(
+                types.InlinedRequestDict(
+                    contents=[
+                        {
+                            "role": "user",
+                            "parts": [{"text": self._user_prompt(sid, text)}],
+                        }
+                    ],
+                    config=types.GenerateContentConfigDict(
+                        system_instruction=system_prompt,
+                        response_schema=schema,
+                        response_mime_type="application/json",
+                    ),
+                )
+            )
+        return requests
 
     def _run_batch(self, scenes: list[dict]) -> list[ClueT]:
         """Common batch processing logic using Template Method pattern."""
@@ -200,15 +226,53 @@ class BatchExtractor(ClueExtractor[ClueT], ABC):
         }
         return self._parse_response(payload, scene_id)
 
+    # ------------------------------------------------------------------
+    # Prompt + schema helpers
+    # ------------------------------------------------------------------
+    def _build_system_prompt_single(self) -> str:
+        if self._system_prompt_single is None:
+            spec = self.get_clue_specification()
+            self._system_prompt_single = build_system_prompt([spec])
+        return self._system_prompt_single
+
+    def _user_prompt(self, scene_id: int, text: str) -> str:
+        return f"SCENE_ID: {scene_id}\nTEXT:\n{text}\n\nExtract all applicable clues."
+
+    def _build_response_schema(self) -> Type[BaseModel]:
+        if self._response_schema_single is None:
+            slug = self._clue_slug
+            api_model = self.get_api_model()
+            fields = {
+                "participants": (list[str], Field(default_factory=list)),
+                f"{slug}_clues": (list[api_model], Field(default_factory=list)),
+            }
+            self._response_schema_single = create_model(
+                f"{slug.title()}ExtractionPayload", **fields
+            )
+        return self._response_schema_single
+
+    def get_prompt_section(self) -> str:
+        """Legacy method for backward compatibility with prompt builders."""
+        spec = self.get_clue_specification()
+        sections = [
+            f"## {spec['display_name']}",
+            f"PURPOSE: {spec['purpose']}\n",
+            "CORE CONCEPTS:",
+        ]
+        for name, desc in spec["concepts"]:
+            sections.append(f"  - {name}: {desc}")
+        special_rules = spec.get("special_rules") or []
+        if special_rules:
+            sections.append("\nSPECIAL RULES:")
+            for rule in special_rules:
+                sections.append(f"  - {rule}")
+        return "\n".join(sections)
+
 
 class CombinedBatchExtractor(BatchExtractor[BaseClue]):
     """Batch extractor that multiplexes several BatchExtractors into one call."""
 
     _clue_slug = "combined"
-    _PROMPT_HEADER = (
-        "You extract MULTIPLE types of structured clues from a single scene.\n"
-        "Return JSON that includes ALL requested clue families exactly once."
-    )
 
     def __init__(self, extractors: Sequence[BatchExtractor[Any]]) -> None:
         super().__init__()
@@ -246,7 +310,8 @@ class CombinedBatchExtractor(BatchExtractor[BaseClue]):
                 configure(config)
 
     def get_prompt_section(self) -> str:  # pragma: no cover - unused for combined
-        return self._PROMPT_HEADER
+        specs = [extractor.get_clue_specification() for extractor in self._sub_extractors]
+        return build_system_prompt(specs)
 
     def get_api_model(self) -> Type[BaseModel]:  # pragma: no cover - unused
         if self._response_schema is None:
@@ -325,22 +390,8 @@ class CombinedBatchExtractor(BatchExtractor[BaseClue]):
         return create_model("CombinedExtractionPayload", **fields)  # type: ignore[arg-type]
 
     def _build_system_prompt(self) -> str:
-        divider = "=" * 60
-        sections: list[str] = [self._PROMPT_HEADER.strip()]
-        for extractor in self._sub_extractors:
-            sections.append(divider)
-            sections.append(extractor.get_prompt_section().strip())
-        sections.append(divider)
-        sections.append("OUTPUT SCHEMA:\n" + self._render_schema_block())
-        return "\n".join(sections).strip()
-
-    def _render_schema_block(self) -> str:
-        lines = ["{", '  "participants": ["..."]']
-        for extractor in self._sub_extractors:
-            slug = extractor._clue_slug
-            lines.append(f'  "{slug}_clues": []')
-        lines.append("}")
-        return "\n".join(lines)
+        specs = [extractor.get_clue_specification() for extractor in self._sub_extractors]
+        return build_system_prompt(specs)
 
     def _ensure_assets(self) -> tuple[type[BaseModel], str]:
         if self._response_schema is None:
