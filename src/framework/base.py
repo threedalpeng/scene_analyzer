@@ -15,6 +15,7 @@ from typing import (
     TypeVar,
 )
 
+from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field, ValidationError, create_model
 
@@ -101,7 +102,7 @@ class BatchExtractor(ClueExtractor[ClueT], ABC):
     def __init__(self) -> None:
         super().__init__()
         self._participants: MutableMapping[int, list[str]] = {}
-        self._client: Any = None
+        self._client: genai.Client | None = None
         self._batch_size: int | None = None
         self._id_counters: defaultdict[int, int] = defaultdict(int)
 
@@ -410,7 +411,7 @@ class CombinedBatchExtractor(BatchExtractor[BaseClue]):
         return "\n".join(sections).strip()
 
     def _render_schema_block(self) -> str:
-        lines = ['{', '  "participants": ["..."]']
+        lines = ["{", '  "participants": ["..."]']
         for extractor in self._sub_extractors:
             slug = extractor._clue_slug
             lines.append(f'  "{slug}_clues": []')

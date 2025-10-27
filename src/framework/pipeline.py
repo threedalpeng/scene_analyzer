@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence, Type
 
+from google import genai
+
 from framework.base import BatchExtractor, ClueExtractor, CombinedBatchExtractor
 from framework.registry import ClueRegistry
 from framework.result import PipelineResult
@@ -15,7 +17,7 @@ Processor = Callable[[PipelineResult], Any]
 
 @dataclass(slots=True)
 class PipelineConfig:
-    client: Any | None = None
+    client: genai.Client | None = None
     batch_size: int = 10
     validate: bool = True
     strict_validation: bool = False
@@ -62,17 +64,18 @@ class Pipeline:
 
     def extract(
         self,
-        extractor: Type[ClueExtractor] | ClueExtractor | list[Type[ClueExtractor] | ClueExtractor],
+        extractor: Type[ClueExtractor]
+        | ClueExtractor
+        | list[Type[ClueExtractor] | ClueExtractor],
         /,
         **params: Any,
     ) -> "Pipeline":
         if isinstance(extractor, list):
             if params:
-                raise ValueError("keyword overrides are not supported for extractor lists")
-            members = [
-                self._instantiate_extractor(item, {})
-                for item in extractor
-            ]
+                raise ValueError(
+                    "keyword overrides are not supported for extractor lists"
+                )
+            members = [self._instantiate_extractor(item, {}) for item in extractor]
             batch_members: list[BatchExtractor[Any]] = []
             for member in members:
                 if not isinstance(member, BatchExtractor):
