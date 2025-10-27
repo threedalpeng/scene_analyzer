@@ -285,6 +285,16 @@ class CombinedBatchExtractor(BatchExtractor[BaseClue]):
             lambda: defaultdict(int)
         )
 
+    def get_clue_specification(self) -> dict:
+        """
+        Combined extractor doesn't have a single specification.
+        This should not be called - use sub_extractors instead.
+        """
+        raise NotImplementedError(
+            "CombinedBatchExtractor wraps multiple extractors. "
+            "Use sub_extractors to access individual specifications."
+        )
+
     @property
     def clue_type(self) -> Type[BaseClue]:  # noqa: D401
         return BaseClue
@@ -310,7 +320,9 @@ class CombinedBatchExtractor(BatchExtractor[BaseClue]):
                 configure(config)
 
     def get_prompt_section(self) -> str:  # pragma: no cover - unused for combined
-        specs = [extractor.get_clue_specification() for extractor in self._sub_extractors]
+        specs = [
+            extractor.get_clue_specification() for extractor in self._sub_extractors
+        ]
         return build_system_prompt(specs)
 
     def get_api_model(self) -> Type[BaseModel]:  # pragma: no cover - unused
@@ -390,7 +402,9 @@ class CombinedBatchExtractor(BatchExtractor[BaseClue]):
         return create_model("CombinedExtractionPayload", **fields)  # type: ignore[arg-type]
 
     def _build_system_prompt(self) -> str:
-        specs = [extractor.get_clue_specification() for extractor in self._sub_extractors]
+        specs = [
+            extractor.get_clue_specification() for extractor in self._sub_extractors
+        ]
         return build_system_prompt(specs)
 
     def _ensure_assets(self) -> tuple[type[BaseModel], str]:
