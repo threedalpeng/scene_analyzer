@@ -96,7 +96,7 @@ class ClueExtractor(Generic[ClueT], ABC):
 class BatchExtractor(ClueExtractor[ClueT], ABC):
     """Template for extractors that operate over scene batches via LLM jobs."""
 
-    batch_size: int = 10
+    batch_size: int = 50
     _clue_slug: str = ""
 
     def __init__(self) -> None:
@@ -171,6 +171,7 @@ class BatchExtractor(ClueExtractor[ClueT], ABC):
             self._poll_job(job, batch_idx, total)
 
             # Process responses
+            assert job.name
             bj = self._client.batches.get(name=job.name)
             assert bj.dest is not None and bj.dest.inlined_responses is not None
 
@@ -183,9 +184,11 @@ class BatchExtractor(ClueExtractor[ClueT], ABC):
 
         return outputs
 
-    def _poll_job(self, job: Any, batch_idx: int, total: int) -> None:
+    def _poll_job(self, job: types.BatchJob, batch_idx: int, total: int) -> None:
         """Poll batch job until completion."""
-        assert job.name is not None
+        assert job.name
+        assert self._client
+
         done_states = {
             "JOB_STATE_SUCCEEDED",
             "JOB_STATE_FAILED",

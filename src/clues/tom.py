@@ -115,7 +115,7 @@ class ToMExtractor(BatchExtractor):
         if self._batch_size is None:
             self._batch_size = config.batch_size
         if self._batch_size is None:
-            self._batch_size = 10
+            self._batch_size = 50
         if self._client is None:
             raise ValueError("ToMExtractor requires a client; none provided in config")
 

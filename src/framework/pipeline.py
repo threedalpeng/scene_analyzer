@@ -18,7 +18,7 @@ Processor = Callable[[PipelineResult], Any]
 @dataclass(slots=True)
 class PipelineConfig:
     client: genai.Client | None = None
-    batch_size: int = 10
+    batch_size: int = 50
     validate: bool = True
     strict_validation: bool = False
     checkpoint_enabled: bool = False
@@ -40,8 +40,8 @@ class Pipeline:
         self,
         config: PipelineConfig | None = None,
         *,
-        client: Any | None = None,
-        batch_size: int = 10,
+        client: genai.Client | None = None,
+        batch_size: int = 50,
         validate: bool = True,
         strict_validation: bool = False,
         checkpoint_enabled: bool = False,
