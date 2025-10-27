@@ -11,7 +11,7 @@ from google.genai import types
 from clues.act import ActClue, act_score, bundle_same_scene, explode_directed
 from clues.tom import ToMClue
 from framework.result import PipelineResult
-from processors.results import SynthesisResult
+from processors.types import SynthesisResult
 from schema import LLMAdjudication
 from utils import log_status, parse_model
 

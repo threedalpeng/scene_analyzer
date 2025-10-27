@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Iterable, Sequence
 import networkx as nx
 
 from framework.result import PipelineResult
-from processors.results import TemporalResult
+from processors.types import TemporalResult
 from schema import BaseClue
 
 if TYPE_CHECKING:

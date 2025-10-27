@@ -5,7 +5,8 @@ from typing import TYPE_CHECKING, Any, Literal, Mapping, Type
 from google.genai import types
 from pydantic import BaseModel, Field, field_validator
 
-from framework.base import BatchExtractor, ClueValidator
+from framework.base import ClueValidator
+from framework.batch import BatchExtractor
 from schema import BaseClue, ValidationResult
 from utils import parse_model
 

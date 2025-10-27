@@ -11,7 +11,7 @@ from clues.act import ActClue
 from clues.entity import EntityClue
 from clues.tom import ToMClue
 from framework.result import PipelineResult
-from processors.results import AliasingResult
+from processors.types import AliasingResult
 from schema import AliasGroup, AliasGroups
 from utils import norm_pair, parse_model
 

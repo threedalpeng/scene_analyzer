@@ -5,7 +5,8 @@ from typing import Any, Literal, Mapping, TYPE_CHECKING, Type
 from google.genai import types
 from pydantic import BaseModel, Field, field_validator
 
-from framework.base import BatchExtractor, ClueValidator
+from framework.base import ClueValidator
+from framework.batch import BatchExtractor
 from schema import BaseClue, ValidationResult
 from utils import parse_model
 
@@ -64,12 +65,12 @@ class _TemporalExtractionPayload(BaseModel):
 
 
 class TemporalValidator(ClueValidator):
-    def validate_semantic(self, clue: BaseClue) -> ValidationResult:
+    def validate_semantic(self, clue: TemporalClue) -> ValidationResult:
         _ = clue
         return ValidationResult.ok(level="semantic")
 
     def validate_coherence(
-        self, clue: BaseClue, context: Mapping[str, object] | None = None
+        self, clue: TemporalClue, context: Mapping[str, object] | None = None
     ) -> ValidationResult | None:
         if context is None:
             return None

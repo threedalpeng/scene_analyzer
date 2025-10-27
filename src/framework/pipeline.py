@@ -6,7 +6,8 @@ from typing import Any, Callable, Mapping, Sequence, Type
 
 from google import genai
 
-from framework.base import BatchExtractor, ClueExtractor, CombinedBatchExtractor
+from framework.base import ClueExtractor
+from framework.batch import BatchExtractor, CombinedBatchExtractor
 from framework.registry import ClueRegistry
 from framework.result import PipelineResult
 from framework.validation import ValidationContext, ValidationPipeline

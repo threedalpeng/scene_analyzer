@@ -2,7 +2,6 @@ import argparse
 import json
 from pathlib import Path
 
-from client import make_client
 from clues.act import ActExtractor
 from clues.entity import EntityExtractor
 from clues.temporal import TemporalExtractor
@@ -12,7 +11,7 @@ from processors.aliasing import AliasResolver
 from processors.result_saver import ResultSaver
 from processors.synthesis import DyadSynthesizer
 from processors.temporal import TemporalReconstructor
-from utils import ensure_dir, log_status
+from utils import ensure_dir, log_status, make_client
 
 
 def _load_scenes(path: Path) -> list[dict]:

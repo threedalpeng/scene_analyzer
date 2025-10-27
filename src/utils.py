@@ -1,9 +1,11 @@
 import json
+import os
 from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Type, TypeVar
 
+from google import genai
 from pydantic import BaseModel
 
 
@@ -45,3 +47,13 @@ def parse_model(model: Type[T], payload: str | dict[str, Any] | BaseModel) -> T:
     else:
         data = payload
     return model.model_validate(data)
+
+
+def make_client() -> genai.Client:
+    api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise RuntimeError(
+            "Set GOOGLE_API_KEY (or GEMINI_API_KEY) in your environment."
+        )
+    client = genai.Client(api_key=api_key)
+    return client

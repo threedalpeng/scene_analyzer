@@ -9,7 +9,7 @@ from clues.entity import EntityClue
 from clues.temporal import TemporalClue
 from clues.tom import ToMClue
 from framework.result import PipelineResult
-from processors.results import AliasingResult, SynthesisResult, TemporalResult
+from processors.types import AliasingResult, SynthesisResult, TemporalResult
 from schema import BaseClue, LLMAdjudication, ValidationResult
 from utils import ensure_dir, jsonl_write, log_status
 
@@ -95,7 +95,7 @@ class ResultSaver:
 # Helper serialization routines reused between CLI + processors
 # ---------------------------------------------------------------------------
 def _serialize_validation(
-    records: Iterable[tuple[BaseClue, Iterable[ValidationResult]]]
+    records: Iterable[tuple[BaseClue, Iterable[ValidationResult]]],
 ) -> list[dict]:
     serialized: list[dict] = []
     for clue, validations in records:
