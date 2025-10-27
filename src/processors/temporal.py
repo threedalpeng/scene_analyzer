@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Iterable, Sequence
+from typing import TYPE_CHECKING, Dict, Iterable, Mapping, Sequence
 
 import networkx as nx
 
 from framework.processor import Processor
 from framework.result import PipelineResult
-from processors.types import TemporalResult
 from schema import BaseClue
 
 if TYPE_CHECKING:
@@ -21,7 +20,12 @@ class Edge:
     weight: float
 
 
-class FabulaReconstructor(Processor):
+@dataclass(slots=True)
+class TemporalResult:
+    fabula_rank: dict[int, int]
+
+
+class FabulaReconstructor:
     """Reconstruct chronological scene order from heterogeneous clues."""
 
     def reconstruct(
@@ -91,7 +95,7 @@ class FabulaReconstructor(Processor):
                 return
 
 
-class TemporalReconstructor:
+class TemporalReconstructor(Processor):
     """
     Reconstruct chronological scene order (fabula) from narrative order (syuzhet).
 
@@ -113,5 +117,34 @@ class TemporalReconstructor:
         fabula = self._engine.reconstruct(scenes, result.all_clues, metadata)
         return TemporalResult(fabula_rank=fabula)
 
+    def checkpoint_state(
+        self, result: PipelineResult, output: TemporalResult | None
+    ) -> Mapping[str, object] | None:
+        _ = result
+        if output is None:
+            return None
+        return _serialize_temporal(output)
 
-__all__ = ["TemporalReconstructor", "FabulaReconstructor"]
+    def restore_from_checkpoint(
+        self, payload: Mapping[str, object], result: PipelineResult
+    ) -> TemporalResult | None:
+        _ = result
+        try:
+            return _deserialize_temporal(payload)
+        except KeyError:
+            return None
+
+
+def _serialize_temporal(result: TemporalResult) -> Dict[str, object]:
+    return {"fabula_rank": {int(k): int(v) for k, v in result.fabula_rank.items()}}
+
+
+def _deserialize_temporal(payload: Mapping[str, object]) -> TemporalResult:
+    raw = payload.get("fabula_rank")
+    fabula_rank: Dict[int, int] = {}
+    if isinstance(raw, Mapping):
+        fabula_rank = {int(k): int(v) for k, v in raw.items()}
+    return TemporalResult(fabula_rank=fabula_rank)
+
+
+__all__ = ["TemporalReconstructor", "FabulaReconstructor", "TemporalResult"]

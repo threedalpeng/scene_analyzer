@@ -85,6 +85,11 @@ class ClueExtractor(Generic[ClueT], ABC):
         """Return extractors that should be registered for validation."""
         return [self]
 
+    def checkpoint_id(self) -> str:
+        """Stable identifier used for checkpoint bookkeeping."""
+        cls = self.__class__
+        return f"{cls.__module__}.{cls.__qualname__}"
+
 
 __all__ = [
     "ClueExtractor",

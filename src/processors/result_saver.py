@@ -11,7 +11,9 @@ from clues.tom import ToMClue
 from framework.pipeline import PipelineConfig
 from framework.processor import Processor
 from framework.result import PipelineResult
-from processors.types import AliasingResult, SynthesisResult, TemporalResult
+from processors.aliasing import AliasingResult
+from processors.synthesis import SynthesisResult
+from processors.temporal import TemporalResult
 from schema import BaseClue, LLMAdjudication, ValidationResult
 from utils import ensure_dir, jsonl_write, log_status
 

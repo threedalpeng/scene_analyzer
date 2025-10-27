@@ -2,7 +2,7 @@ import time
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, MutableMapping, Sequence
-from typing import Any, Type
+from typing import Any, Callable, Type
 
 from google import genai
 from google.genai import types
@@ -27,6 +27,8 @@ class BatchExtractor(ClueExtractor[ClueT], ABC):
         self._client: genai.Client | None = None
         self._batch_size: int | None = None
         self._id_counters: defaultdict[int, int] = defaultdict(int)
+        self._completed_scenes: set[int] = set()
+        self._progress_callback: Callable[[list[int]], None] | None = None
         self._response_schema_single: type[BaseModel] | None = None
         self._system_prompt_single: str | None = None
 
@@ -51,8 +53,15 @@ class BatchExtractor(ClueExtractor[ClueT], ABC):
         return self.batch_extract([(scene_id, scene_text)])
 
     def batch_extract(self, items: Iterable[tuple[int, str]]) -> Sequence[ClueT]:
-        scenes = [{"scene": sid, "text": txt} for sid, txt in items]
+        scenes = [
+            {"scene": sid, "text": txt}
+            for sid, txt in items
+            if int(sid) not in self._completed_scenes
+        ]
         return self._run_batch(scenes)
+
+    def effective_batch_size(self) -> int:
+        return self._batch_size or self.batch_size
 
     def _build_inline_requests(
         self, scenes: list[dict]
@@ -122,12 +131,19 @@ class BatchExtractor(ClueExtractor[ClueT], ABC):
             bj = self._client.batches.get(name=job.name)
             assert bj.dest is not None and bj.dest.inlined_responses is not None
 
+            successful_ids: list[int] = []
             for idx, resp in enumerate(bj.dest.inlined_responses, start=1):
+                scene_id = int(sub[idx - 1]["scene"])
                 result = self._process_single_response(
                     resp, sub[idx - 1], batch_idx, total, idx
                 )
                 if result:
                     outputs.extend(result)
+                    scene_success = int(sub[idx - 1]["scene"])
+                    successful_ids.append(scene_success)
+
+            if successful_ids and self._progress_callback:
+                self._progress_callback(successful_ids)
 
         return outputs
 
@@ -193,6 +209,7 @@ class BatchExtractor(ClueExtractor[ClueT], ABC):
             clues = self._assign_ids(scene_id, clues)
             if participants:
                 self._participants[scene_id] = participants
+            self._completed_scenes.add(scene_id)
             return clues
         except (ValidationError, Exception) as err:
             log_status(f"{prefix} parse error -> {err}")
@@ -225,6 +242,17 @@ class BatchExtractor(ClueExtractor[ClueT], ABC):
             f"{self._clue_slug}_clues": serialized,
         }
         return self._parse_response(payload, scene_id)
+
+    def load_checkpoint(self, completed_scene_ids: Iterable[int]) -> None:
+        self._completed_scenes = {int(scene_id) for scene_id in completed_scene_ids}
+
+    def dump_checkpoint(self) -> list[int]:
+        return sorted(self._completed_scenes)
+
+    def set_progress_callback(
+        self, callback: Callable[[list[int]], None] | None
+    ) -> None:
+        self._progress_callback = callback
 
     # ------------------------------------------------------------------
     # Prompt + schema helpers

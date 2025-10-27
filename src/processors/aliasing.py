@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Dict, Mapping
 
 from google import genai
 from google.genai import types
@@ -12,12 +13,17 @@ from clues.entity import EntityClue
 from clues.tom import ToMClue
 from framework.processor import Processor
 from framework.result import PipelineResult
-from processors.types import AliasingResult
 from schema import AliasGroup, AliasGroups
 from utils import norm_pair, parse_model
 
 if TYPE_CHECKING:
     from framework.pipeline import PipelineConfig
+
+
+@dataclass(slots=True)
+class AliasingResult:
+    alias_groups: AliasGroups
+    alias_map: Dict[str, str]
 
 
 class AliasResolver(Processor):
@@ -50,6 +56,23 @@ class AliasResolver(Processor):
         final_groups = AliasGroups(groups=[*base_groups.groups, *llm_groups.groups])
         alias_map = self._build_alias_map(final_groups)
         return AliasingResult(alias_groups=final_groups, alias_map=alias_map)
+
+    def checkpoint_state(
+        self, result: PipelineResult, output: AliasingResult | None
+    ) -> Mapping[str, object] | None:
+        _ = result
+        if output is None:
+            return None
+        return _serialize_aliasing(output)
+
+    def restore_from_checkpoint(
+        self, payload: Mapping[str, object], result: PipelineResult
+    ) -> AliasingResult | None:
+        _ = result
+        try:
+            return _deserialize_aliasing(payload)
+        except KeyError:
+            return None
 
     @staticmethod
     def from_clues(result: PipelineResult) -> AliasGroups:
@@ -176,4 +199,23 @@ def alias_pair(p: tuple[str, str], amap: dict[str, str]) -> tuple[str, str]:
     return norm_pair(alias_name(p[0], amap), alias_name(p[1], amap))
 
 
-__all__ = ["AliasResolver", "alias_name", "alias_pair"]
+def _serialize_aliasing(result: AliasingResult) -> Dict[str, object]:
+    return {
+        "alias_groups": result.alias_groups.model_dump(),
+        "alias_map": dict(result.alias_map),
+    }
+
+
+def _deserialize_aliasing(payload: Mapping[str, object]) -> AliasingResult:
+    groups_obj = payload.get("alias_groups")
+    alias_groups = AliasGroups.model_validate(groups_obj)
+
+    alias_map_raw = payload.get("alias_map")
+    alias_map: Dict[str, str] = {}
+    if isinstance(alias_map_raw, Mapping):
+        alias_map = {str(k): str(v) for k, v in alias_map_raw.items()}
+
+    return AliasingResult(alias_groups=alias_groups, alias_map=alias_map)
+
+
+__all__ = ["AliasResolver", "AliasingResult", "alias_name", "alias_pair"]

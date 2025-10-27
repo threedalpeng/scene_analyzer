@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, Mapping, Sequence, Type, TypeVar, overload
+from typing import Any, Dict, Iterable, Iterator, Mapping, Sequence, Type, TypeVar, overload
 
 from schema import BaseClue, ValidationResult
 
@@ -77,6 +77,17 @@ class PipelineResult:
     @property
     def clue_index(self) -> Mapping[type[BaseClue], Sequence[BaseClue]]:
         return self._clues
+
+    def iter_clue_items(self) -> Iterator[tuple[type[BaseClue], list[BaseClue]]]:
+        for clue_type, clues in self._clues.items():
+            yield clue_type, list(clues)
+
+    def iter_outputs(self) -> Iterator[tuple[type, Any]]:
+        for output_type, value in self._outputs.items():
+            yield output_type, value
+
+    def clear_outputs(self) -> None:
+        self._outputs.clear()
 
 
 __all__ = ["PipelineResult"]

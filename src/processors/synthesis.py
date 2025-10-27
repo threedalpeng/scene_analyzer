@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Iterable
+from typing import TYPE_CHECKING, Dict, Iterable, Mapping, Tuple
 
 from google import genai
 from google.genai import types
@@ -12,7 +12,6 @@ from clues.act import ActClue, act_score, bundle_same_scene, explode_directed
 from clues.tom import ToMClue
 from framework.processor import Processor
 from framework.result import PipelineResult
-from processors.types import SynthesisResult
 from schema import LLMAdjudication
 from utils import log_status, parse_model
 
@@ -78,6 +77,13 @@ class DyadBag:
     acts_rep: list[ActClue] = field(default_factory=list)
     acts_all: list[ActClue] = field(default_factory=list)
     toms: list[ToMClue] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class SynthesisResult:
+    acts_representative: list[ActClue]
+    acts_directed: list[ActClue]
+    dyad_results: Dict[Tuple[str, str], LLMAdjudication]
 
 
 def build_bags(
@@ -190,6 +196,23 @@ class DyadSynthesizer(Processor):
             dyad_results=adjudication,
         )
 
+    def checkpoint_state(
+        self, result: PipelineResult, output: SynthesisResult | None
+    ) -> Mapping[str, object] | None:
+        _ = result
+        if output is None:
+            return None
+        return _serialize_synthesis(output)
+
+    def restore_from_checkpoint(
+        self, payload: Mapping[str, object], result: PipelineResult
+    ) -> SynthesisResult | None:
+        _ = result
+        try:
+            return _deserialize_synthesis(payload)
+        except KeyError:
+            return None
+
     def _run_batch(
         self, items: Iterable[tuple[tuple[str, str], DyadBag]]
     ) -> dict[tuple[str, str], LLMAdjudication]:
@@ -294,8 +317,56 @@ class DyadSynthesizer(Processor):
         return requests, order
 
 
+def _serialize_synthesis(result: SynthesisResult) -> Dict[str, object]:
+    return {
+        "acts_representative": [clue.model_dump() for clue in result.acts_representative],
+        "acts_directed": [clue.model_dump() for clue in result.acts_directed],
+        "dyad_results": [
+            {"pair": list(pair), "adjudication": adjudication.model_dump()}
+            for pair, adjudication in result.dyad_results.items()
+        ],
+    }
+
+
+def _deserialize_synthesis(payload: Mapping[str, object]) -> SynthesisResult:
+    acts_rep_raw = payload.get("acts_representative")
+    acts_directed_raw = payload.get("acts_directed")
+    dyad_raw = payload.get("dyad_results")
+
+    acts_rep = (
+        [ActClue.model_validate(item) for item in acts_rep_raw]  # type: ignore[arg-type]
+        if isinstance(acts_rep_raw, list)
+        else []
+    )
+    acts_directed = (
+        [ActClue.model_validate(item) for item in acts_directed_raw]  # type: ignore[arg-type]
+        if isinstance(acts_directed_raw, list)
+        else []
+    )
+    dyads: Dict[Tuple[str, str], LLMAdjudication] = {}
+    if isinstance(dyad_raw, list):
+        for entry in dyad_raw:
+            if not isinstance(entry, Mapping):
+                continue
+            pair_obj = entry.get("pair")
+            adj_obj = entry.get("adjudication")
+            if not isinstance(pair_obj, list):
+                continue
+            try:
+                pair = tuple(str(part) for part in pair_obj)
+            except TypeError:
+                continue
+            dyads[pair] = LLMAdjudication.model_validate(adj_obj)
+    return SynthesisResult(
+        acts_representative=acts_rep,
+        acts_directed=acts_directed,
+        dyad_results=dyads,
+    )
+
+
 __all__ = [
     "DyadSynthesizer",
     "DyadBag",
+    "SynthesisResult",
     "build_bags",
 ]
