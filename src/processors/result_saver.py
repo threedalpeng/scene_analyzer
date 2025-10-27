@@ -14,7 +14,7 @@ from framework.result import PipelineResult
 from processors.aliasing import AliasingResult
 from processors.synthesis import SynthesisResult
 from processors.temporal import TemporalResult
-from schema import BaseClue, LLMAdjudication, ValidationResult
+from schema import BaseClue, ValidationResult
 from utils import ensure_dir, jsonl_write, log_status
 
 
@@ -34,6 +34,10 @@ class ResultSaver(Processor):
         """ResultSaver does not require pipeline configuration."""
         ...
 
+    @property
+    def result_type(self) -> None:
+        return None
+
     def save(self, result: PipelineResult) -> None:
         """Write all known artifacts derived from `result`."""
         if self.ensure_directory:
@@ -49,6 +53,10 @@ class ResultSaver(Processor):
     def __call__(self, result: PipelineResult) -> None:
         """Allow ResultSaver to be used as a pipeline processor."""
         self.save(result)
+
+    def checkpoint_id(self) -> str:
+        cls = self.__class__
+        return f"{cls.__module__}.{cls.__qualname__}"
 
     # --- clue + validation writers -------------------------------------------------
     def _write_clue_files(self, result: PipelineResult) -> None:
@@ -100,7 +108,7 @@ class ResultSaver(Processor):
         )
         jsonl_write(
             self.output_dir / "dyad_results.jsonl",
-            _serialize_dyads(synthesis.dyad_results),
+            [dyad.model_dump() for dyad in synthesis.dyads],
         )
 
 
@@ -119,13 +127,6 @@ def _serialize_validation(
             }
         )
     return serialized
-
-
-def _serialize_dyads(dyads: Mapping[tuple[str, str], LLMAdjudication]) -> list[dict]:
-    out: list[dict] = []
-    for pair, adjudication in dyads.items():
-        out.append({"pair": list(pair), "adjudication": adjudication.model_dump()})
-    return out
 
 
 __all__ = ["ResultSaver"]

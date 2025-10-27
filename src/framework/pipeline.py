@@ -2,23 +2,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence, Type
+from typing import Any, Mapping, Sequence, Type
 
 from google import genai
 
 from framework.base import ClueExtractor
 from framework.batch import BatchExtractor, CombinedBatchExtractor
-from framework.pipeline_helpers import (
-    load_or_initialize,
-    merge_extractor_output,
-    prepare_checkpoint,
-    save_checkpoint,
-)
+from framework.checkpoint_session import CheckpointSession
 from framework.processor import Processor
-from framework.registry import ClueRegistry
+from framework.registry import ClueRegistry, ProcessorResultRegistry
 from framework.result import PipelineResult
 from framework.validation import ValidationContext, ValidationPipeline
-from schema import BaseClue, ValidationResult
+from schema import BaseClue
 
 
 @dataclass(slots=True)
@@ -39,6 +34,8 @@ class Pipeline:
         self.config = config or PipelineConfig()
         self._extractors: list[ClueExtractor] = []
         self._processors: list[Processor] = []
+        self._registry = ClueRegistry()
+        self._result_registry = ProcessorResultRegistry()
 
     ##################
     ### Public API ###
@@ -66,15 +63,22 @@ class Pipeline:
                         f"got {type(member).__name__}"
                     )
                 batch_members.append(member)
-            combined = CombinedBatchExtractor(batch_members)
-            self._extractors.append(combined)
+            instance: ClueExtractor = CombinedBatchExtractor(batch_members)
         else:
             instance = self._instantiate_extractor(extractor, params)
-            self._extractors.append(instance)
+
+        self._extractors.append(instance)
+        for member in instance.registry_members():
+            self._registry.register(member)
         return self
 
     def process(self, processor: Processor) -> "Pipeline":
         self._processors.append(processor)
+        result_type = processor.result_type
+        if result_type is not None and not self._result_registry.has_type(
+            result_type.__name__
+        ):
+            self._result_registry.register(result_type)
         return self
 
     def run(
@@ -85,178 +89,26 @@ class Pipeline:
         context: Mapping[str, Any] | None = None,
         resume: bool = False,
     ) -> PipelineResult:
-        metadata = metadata or {}
-        self._configure_extractors()
-        self._configure_processors()
-
-        scene_pairs: list[tuple[int, str]] = [
-            (int(item["scene"]), str(item["text"])) for item in scenes
-        ]
-
-        if not scene_pairs:
+        if not scenes:
             raise ValueError("Pipeline requires at least one scene")
 
-        (
-            checkpoint_manager,
-            extractor_keys,
-            processor_keys,
-            clue_class_map,
-        ) = prepare_checkpoint(
-            self.config.checkpoint_enabled,
-            self.config.output_dir,
-            self._extractors,
-            self._processors,
-        )
+        metadata = metadata or {}
+        session = self._create_session(resume)
+        if session and not session.validate_inputs(scenes, metadata):
+            raise ValueError("Input mismatch with checkpoint")
 
-        result = PipelineResult()
-        (
-            resumed,
-            extractor_completed,
-            next_extractor_index,
-            processor_payloads,
-        ) = load_or_initialize(
-            checkpoint_manager,
-            resume,
-            scenes,
-            metadata,
-            extractor_keys,
-            processor_keys,
-            clue_class_map,
-            result,
-        )
+        result = self._initialize_result(session, scenes, metadata, context)
 
-        if not resumed:
-            result.metadata = {int(k): dict(v) for k, v in metadata.items()}
-            result.scenes = [dict(item) for item in scenes]
-            if context:
-                result.context.update(dict(context))
-
-        processor_payloads_list: list[Mapping[str, object] | None] = [
-            payload if isinstance(payload, Mapping) else None
-            for payload in (processor_payloads or [])
-        ]
-
-        next_processor_index = 0
-
-        while len(processor_payloads_list) < len(self._processors):
-            processor_payloads_list.append(None)
-
-        registry = ClueRegistry()
-        for extractor in self._extractors:
-            for member in extractor.registry_members():
-                registry.register(member)
-
-        def save_state(dirty: bool, *, force: bool = False) -> None:
-            save_checkpoint(
-                checkpoint_manager,
-                dirty,
-                force=force,
-                scenes=scenes,
-                metadata=metadata,
-                extractor_keys=extractor_keys,
-                processor_keys=processor_keys,
-                clue_class_map=clue_class_map,
-                extractor_completed=extractor_completed,
-                result=result,
-                next_extractor_index=next_extractor_index,
-                next_processor_index=next_processor_index,
-                processor_payloads=[
-                    payload
-                    for payload in processor_payloads_list
-                    if payload is not None
-                ],
-            )
-
-        for idx, extractor in enumerate(self._extractors):
-            key = extractor.checkpoint_id()
-            completed = extractor_completed.setdefault(key, set())
-
-            if idx < next_extractor_index:
-                continue
-
-            if isinstance(extractor, BatchExtractor):
-                extractor.load_checkpoint(completed)
-                batch_size = max(1, extractor.effective_batch_size())
-            else:
-                batch_size = len(scene_pairs)
-
-            remaining_pairs = [pair for pair in scene_pairs if pair[0] not in completed]
-
-            if not remaining_pairs:
-                next_extractor_index = idx + 1
-                save_state(dirty=False)
-                continue
-
-            for chunk in _chunk_pairs(remaining_pairs, batch_size):
-                if not chunk:
-                    continue
-                chunk_clues = list(extractor.batch_extract(chunk))
-
-                merge_extractor_output(extractor, chunk_clues, result)
-
-                participants_map = extractor.participants()
-                processed_ids: list[int] = []
-                for scene_id, _ in chunk:
-                    names = participants_map.get(scene_id)
-                    if names:
-                        result.put_participants(scene_id, names)
-                        processed_ids.append(scene_id)
-
-                if processed_ids:
-                    completed.update(processed_ids)
-                    extractor_completed[key] = completed
-                    next_extractor_index = idx
-                    save_state(dirty=True)
-
-            next_extractor_index = idx + 1
-            save_state(dirty=True)
+        self._run_extractors(scenes, result, session)
+        self._run_processors(result, session)
 
         if self.config.validate:
-            validator = ValidationPipeline(registry)
-            validation_context = ValidationContext(
-                known_scenes={sid for sid, _ in scene_pairs},
-            )
-            validations = validator.validate_batch(
-                result.all_clues, context=validation_context
-            )
-            result.validation = validations
-            if self.config.strict_validation:
-                self._raise_on_validation_errors(validations)
+            self._validate(result)
 
-        start_processor_index = 0
-        for idx, processor in enumerate(self._processors):
-            payload = processor_payloads_list[idx]
-            if payload is None:
-                start_processor_index = idx
-                break
-            restored = processor.restore_from_checkpoint(payload, result)
-            if restored is not None:
-                result.put_output(restored)
-            start_processor_index = idx + 1
-
-        next_processor_index = start_processor_index
-
-        for idx in range(start_processor_index, len(self._processors)):
-            processor = self._processors[idx]
-            output = processor(result)
-            if output is not None:
-                result.put_output(output)
-            processor_payloads_list[idx] = processor.checkpoint_state(result, output)
-            next_processor_index = idx + 1
-            save_state(dirty=True)
-
-        if checkpoint_manager is not None:
-            checkpoint_manager.clear()
+        if session:
+            session.save_result(result)
 
         return result
-
-    def _configure_extractors(self) -> None:
-        for extractor in self._extractors:
-            extractor.configure(self.config)
-
-    def _configure_processors(self) -> None:
-        for processor in self._processors:
-            processor.configure(self.config)
 
     def _instantiate_extractor(
         self,
@@ -269,28 +121,131 @@ class Pipeline:
             raise ValueError("keyword overrides require extractor class input")
         return extractor
 
-    @staticmethod
-    def _raise_on_validation_errors(
-        validations: Sequence[tuple[BaseClue, Sequence[ValidationResult]]],
+    def _create_session(self, resume: bool) -> CheckpointSession | None:
+        if not self.config.checkpoint_enabled or self.config.output_dir is None:
+            return None
+        checkpoint_dir = self.config.output_dir / "checkpoint"
+        return CheckpointSession(checkpoint_dir, resume=resume)
+
+    def _initialize_result(
+        self,
+        session: CheckpointSession | None,
+        scenes: list[dict],
+        metadata: Mapping[int, Mapping[str, Any]],
+        context: Mapping[str, Any] | None,
+    ) -> PipelineResult:
+        if session and session.can_resume():
+            return session.load_result(self._registry, self._result_registry)
+
+        result = PipelineResult()
+        result.scenes = [dict(item) for item in scenes]
+        result.metadata = {int(k): dict(v) for k, v in metadata.items()}
+        if context:
+            result.context.update(dict(context))
+        return result
+
+    def _run_extractors(
+        self,
+        scenes: list[dict],
+        result: PipelineResult,
+        session: CheckpointSession | None,
     ) -> None:
-        errors: list[str] = []
-        for clue, records in validations:
-            for record in records:
-                if not record.passed:
-                    errors.append(
-                        f"Scene {clue.scene} | {clue.id} ({clue.clue_type}) "
-                        f"failed {record.level}: {record.errors}"
-                    )
+        for extractor in self._extractors:
+            extractor.configure(self.config)
+            extractor_id = extractor.checkpoint_id()
 
-        if errors:
-            summary = f"Validation failed: {len(errors)} error(s) found\n"
-            raise ValueError(summary + "\n".join(errors))
+            pending: list[tuple[int, str]] = []
+            for entry in scenes:
+                scene_id = int(entry["scene"])
+                if session and session.is_scene_completed(extractor_id, scene_id):
+                    continue
+                pending.append((scene_id, str(entry["text"])))
 
+            if not pending:
+                continue
 
-def _chunk_pairs(
-    pairs: Sequence[tuple[int, str]], batch_size: int
-) -> Iterable[list[tuple[int, str]]]:
-    if batch_size <= 0:
-        raise ValueError("batch_size must be positive for checkpointed execution")
-    for i in range(0, len(pairs), batch_size):
-        yield list(pairs[i : i + batch_size])
+            if isinstance(extractor, BatchExtractor):
+                batch_size = max(1, extractor.effective_batch_size())
+                for idx in range(0, len(pending), batch_size):
+                    batch = pending[idx : idx + batch_size]
+                    clues = extractor.batch_extract(batch)
+                    self._merge_extractor_output(extractor, clues, result)
+
+                    participants = extractor.participants()
+                    completed_ids: list[int] = []
+                    for scene_id, _ in batch:
+                        names = participants.get(scene_id)
+                        if names:
+                            result.put_participants(scene_id, names)
+                        completed_ids.append(scene_id)
+
+                    if session:
+                        session.mark_scenes_completed(extractor_id, completed_ids)
+                        session.save_result(result)
+            else:
+                for scene_id, text in pending:
+                    clues = extractor.extract(text, scene_id)
+                    result.append_clues(extractor.clue_type, clues)
+                    if session:
+                        session.mark_scenes_completed(extractor_id, [scene_id])
+                        session.save_result(result)
+
+    def _run_processors(
+        self,
+        result: PipelineResult,
+        session: CheckpointSession | None,
+    ) -> None:
+        for processor in self._processors:
+            processor.configure(self.config)
+            processor_id = processor.checkpoint_id()
+
+            if session and session.is_processor_completed(processor_id):
+                continue
+
+            output = processor(result)
+            if output is not None:
+                result.put_output(output)
+
+            if session:
+                session.mark_processor_completed(processor_id)
+                session.save_result(result)
+
+    def _validate(self, result: PipelineResult) -> None:
+        validator = ValidationPipeline(self._registry)
+        known_scenes = {int(item["scene"]) for item in result.scenes}
+        context = ValidationContext(known_scenes=known_scenes)
+        validations = validator.validate_batch(result.all_clues, context=context)
+        result.validation = validations
+
+        if self.config.strict_validation:
+            errors: list[str] = []
+            for clue, records in validations:
+                for record in records:
+                    if not record.passed:
+                        errors.append(
+                            f"Scene {clue.scene} | {clue.id} ({clue.clue_type}) "
+                            f"failed {record.level}: {record.errors}"
+                        )
+            if errors:
+                summary = f"Validation failed: {len(errors)} error(s) found"
+                raise ValueError(summary + "\n" + "\n".join(errors))
+
+    def _merge_extractor_output(
+        self,
+        extractor: ClueExtractor,
+        clues: Sequence[BaseClue],
+        result: PipelineResult,
+    ) -> None:
+        if not clues:
+            return
+
+        if isinstance(extractor, CombinedBatchExtractor):
+            from collections import defaultdict
+
+            buckets: dict[type[BaseClue], list[BaseClue]] = defaultdict(list)
+            for clue in clues:
+                buckets[type(clue)].append(clue)
+            for clue_type, items in buckets.items():
+                result.append_clues(clue_type, items)
+        else:
+            result.append_clues(extractor.clue_type, clues)

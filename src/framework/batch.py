@@ -2,7 +2,7 @@ import time
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, MutableMapping, Sequence
-from typing import Any, Callable, Type
+from typing import Any, Type
 
 from google import genai
 from google.genai import types
@@ -28,7 +28,6 @@ class BatchExtractor(ClueExtractor[ClueT], ABC):
         self._batch_size: int | None = None
         self._id_counters: defaultdict[int, int] = defaultdict(int)
         self._completed_scenes: set[int] = set()
-        self._progress_callback: Callable[[list[int]], None] | None = None
         self._response_schema_single: type[BaseModel] | None = None
         self._system_prompt_single: str | None = None
 
@@ -142,9 +141,6 @@ class BatchExtractor(ClueExtractor[ClueT], ABC):
                     scene_success = int(sub[idx - 1]["scene"])
                     successful_ids.append(scene_success)
 
-            if successful_ids and self._progress_callback:
-                self._progress_callback(successful_ids)
-
         return outputs
 
     def _poll_job(self, job: types.BatchJob, batch_idx: int, total: int) -> None:
@@ -242,17 +238,6 @@ class BatchExtractor(ClueExtractor[ClueT], ABC):
             f"{self._clue_slug}_clues": serialized,
         }
         return self._parse_response(payload, scene_id)
-
-    def load_checkpoint(self, completed_scene_ids: Iterable[int]) -> None:
-        self._completed_scenes = {int(scene_id) for scene_id in completed_scene_ids}
-
-    def dump_checkpoint(self) -> list[int]:
-        return sorted(self._completed_scenes)
-
-    def set_progress_callback(
-        self, callback: Callable[[list[int]], None] | None
-    ) -> None:
-        self._progress_callback = callback
 
     # ------------------------------------------------------------------
     # Prompt + schema helpers

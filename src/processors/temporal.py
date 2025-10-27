@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Dict, Iterable, Mapping, Sequence
+from typing import TYPE_CHECKING, Iterable, Sequence, Type
 
 import networkx as nx
+from pydantic import BaseModel
 
 from framework.processor import Processor
 from framework.result import PipelineResult
@@ -20,8 +21,7 @@ class Edge:
     weight: float
 
 
-@dataclass(slots=True)
-class TemporalResult:
+class TemporalResult(BaseModel):
     fabula_rank: dict[int, int]
 
 
@@ -117,34 +117,13 @@ class TemporalReconstructor(Processor):
         fabula = self._engine.reconstruct(scenes, result.all_clues, metadata)
         return TemporalResult(fabula_rank=fabula)
 
-    def checkpoint_state(
-        self, result: PipelineResult, output: TemporalResult | None
-    ) -> Mapping[str, object] | None:
-        _ = result
-        if output is None:
-            return None
-        return _serialize_temporal(output)
+    def checkpoint_id(self) -> str:
+        cls = self.__class__
+        return f"{cls.__module__}.{cls.__qualname__}"
 
-    def restore_from_checkpoint(
-        self, payload: Mapping[str, object], result: PipelineResult
-    ) -> TemporalResult | None:
-        _ = result
-        try:
-            return _deserialize_temporal(payload)
-        except KeyError:
-            return None
-
-
-def _serialize_temporal(result: TemporalResult) -> Dict[str, object]:
-    return {"fabula_rank": {int(k): int(v) for k, v in result.fabula_rank.items()}}
-
-
-def _deserialize_temporal(payload: Mapping[str, object]) -> TemporalResult:
-    raw = payload.get("fabula_rank")
-    fabula_rank: Dict[int, int] = {}
-    if isinstance(raw, Mapping):
-        fabula_rank = {int(k): int(v) for k, v in raw.items()}
-    return TemporalResult(fabula_rank=fabula_rank)
+    @property
+    def result_type(self) -> Type[TemporalResult]:
+        return TemporalResult
 
 
 __all__ = ["TemporalReconstructor", "FabulaReconstructor", "TemporalResult"]
