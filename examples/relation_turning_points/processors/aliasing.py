@@ -10,14 +10,14 @@ from google.genai import types
 from clues.act import ActClue
 from clues.entity import EntityClue
 from clues.tom import ToMClue
-from framework.processor import Processor
-from framework.result import PipelineResult
+from framework.core.processor import Processor
+from framework.core.result import PipelineResult
 from pydantic import BaseModel
-from schema import AliasGroup, AliasGroups
-from utils import norm_pair, parse_model
+from framework.schema import AliasGroup, AliasGroups
+from framework.utils import norm_pair, parse_model
 
 if TYPE_CHECKING:
-    from framework.pipeline import PipelineConfig
+    from framework.core.pipeline import PipelineConfig
 
 
 class AliasingResult(BaseModel):

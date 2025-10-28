@@ -8,14 +8,14 @@ from clues.act import ActClue
 from clues.entity import EntityClue
 from clues.temporal import TemporalClue
 from clues.tom import ToMClue
-from framework.pipeline import PipelineConfig
-from framework.processor import Processor
-from framework.result import PipelineResult
+from framework.core.pipeline import PipelineConfig
+from framework.core.processor import Processor
+from framework.core.result import PipelineResult
 from processors.aliasing import AliasingResult
 from processors.synthesis import SynthesisResult
 from processors.temporal import TemporalResult
-from schema import BaseClue, ValidationResult
-from utils import ensure_dir, jsonl_write, log_status
+from framework.schema import BaseClue, ValidationResult
+from framework.utils import ensure_dir, jsonl_write, log_status
 
 
 class ResultSaver(Processor):

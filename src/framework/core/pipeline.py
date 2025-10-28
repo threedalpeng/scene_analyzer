@@ -6,13 +6,13 @@ from typing import Any, Literal, Mapping, Sequence, Type, TypeGuard, cast
 
 from google import genai
 
-from framework.base import ClueExtractor
-from framework.batch import BatchExtractor, CombinedBatchExtractor
-from framework.processor import Processor
-from framework.registry import ClueRegistry
-from framework.result import PipelineResult
-from framework.validation import ValidationContext, ValidationPipeline
-from schema import BaseClue
+from framework.core.base import ClueExtractor
+from framework.core.batch import BatchExtractor, CombinedBatchExtractor
+from framework.core.processor import Processor
+from framework.core.registry import ClueRegistry
+from framework.core.result import PipelineResult
+from framework.core.validation import ValidationContext, ValidationPipeline
+from framework.schema import BaseClue
 
 
 @dataclass(slots=True)
@@ -201,7 +201,7 @@ class Pipeline:
                 result.merge_context(dict(context))
             if segment_metadata:
                 result.merge_context(
-                    {"framework.segment_metadata": segment_metadata}
+                    {"framework.core.segment_metadata": segment_metadata}
                 )
             return result, load_checkpoint.stem
 
@@ -211,7 +211,7 @@ class Pipeline:
         result = PipelineResult(segments=[dict(item) for item in segments])
         base_context: dict[str, Any] = {}
         if segment_metadata:
-            base_context["framework.segment_metadata"] = segment_metadata
+            base_context["framework.core.segment_metadata"] = segment_metadata
         if context:
             base_context.update(dict(context))
         if base_context:

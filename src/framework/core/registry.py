@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Iterable, Iterator, Type
 
-from framework.base import ClueExtractor
-from schema import BaseClue
+from framework.core.base import ClueExtractor
+from framework.schema import BaseClue
 
 
 class ClueRegistry:

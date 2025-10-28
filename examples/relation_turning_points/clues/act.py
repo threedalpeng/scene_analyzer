@@ -5,9 +5,9 @@ from typing import TYPE_CHECKING, Any, Literal, Mapping, Sequence, Type
 
 from pydantic import BaseModel, Field
 
-from framework.base import ClueValidator
-from framework.batch import BatchExtractor
-from schema import (
+from framework.core.base import ClueValidator
+from framework.core.batch import BatchExtractor
+from framework.schema import (
     Durability,
     EvidenceClippingMixin,
     GoalAlignment,
@@ -17,10 +17,10 @@ from schema import (
     ValidationResult,
     Volition,
 )
-from utils import parse_model
+from framework.utils import parse_model
 
 if TYPE_CHECKING:
-    from framework.pipeline import PipelineConfig
+    from framework.core.pipeline import PipelineConfig
 
 STAKE_RANK = {"major": 3, "moderate": 2, "minor": 1}
 SALIENCE_RANK = {"high": 3, "medium": 2, "low": 1}

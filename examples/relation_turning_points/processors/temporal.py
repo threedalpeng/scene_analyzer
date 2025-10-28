@@ -6,12 +6,12 @@ from typing import TYPE_CHECKING, Iterable, Sequence, Type
 import networkx as nx
 from pydantic import BaseModel
 
-from framework.processor import Processor
-from framework.result import PipelineResult
-from schema import BaseClue
+from framework.core.processor import Processor
+from framework.core.result import PipelineResult
+from framework.schema import BaseClue
 
 if TYPE_CHECKING:
-    from framework.pipeline import PipelineConfig
+    from framework.core.pipeline import PipelineConfig
 
 
 @dataclass(slots=True)

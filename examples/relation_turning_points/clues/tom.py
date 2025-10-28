@@ -4,13 +4,13 @@ from typing import TYPE_CHECKING, Any, Literal, Mapping, Type
 
 from pydantic import BaseModel, Field
 
-from framework.base import ClueValidator
-from framework.batch import BatchExtractor
-from schema import EvidenceClippingMixin, PairClue, ValidationResult
-from utils import parse_model
+from framework.core.base import ClueValidator
+from framework.core.batch import BatchExtractor
+from framework.schema import EvidenceClippingMixin, PairClue, ValidationResult
+from framework.utils import parse_model
 
 if TYPE_CHECKING:
-    from framework.pipeline import PipelineConfig
+    from framework.core.pipeline import PipelineConfig
 
 
 class ToMValidator(ClueValidator):

@@ -11,13 +11,13 @@ from pydantic import BaseModel
 
 from clues.act import ActClue, act_score, bundle_same_segment, explode_directed
 from clues.tom import ToMClue
-from framework.processor import Processor
-from framework.result import PipelineResult
-from schema import LLMAdjudication
-from utils import log_status, parse_model
+from framework.core.processor import Processor
+from framework.core.result import PipelineResult
+from framework.schema import LLMAdjudication
+from framework.utils import log_status, parse_model
 
 if TYPE_CHECKING:
-    from framework.pipeline import PipelineConfig
+    from framework.core.pipeline import PipelineConfig
 
 
 DYAD_SYSTEM_PROMPT = """

@@ -15,7 +15,7 @@ from typing import (
 
 from pydantic import BaseModel, Field
 
-from schema import BaseClue, ValidationResult
+from framework.schema import BaseClue, ValidationResult
 
 T = TypeVar("T")
 TOutput = TypeVar("TOutput", bound=BaseModel)

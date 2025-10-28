@@ -3,15 +3,14 @@ import json
 from pathlib import Path
 
 from clues.act import ActExtractor
-from clues.entity import EntityExtractor
 from clues.temporal import TemporalExtractor
 from clues.tom import ToMExtractor
-from framework import Pipeline, PipelineConfig
+from framework.core import Pipeline, PipelineConfig
 from processors.aliasing import AliasResolver
 from processors.result_saver import ResultSaver
 from processors.synthesis import DyadSynthesizer
 from processors.temporal import TemporalReconstructor
-from utils import ensure_dir, log_status, make_client
+from framework.utils import ensure_dir, log_status, make_client
 
 
 def _load_segments(path: Path) -> list[dict]:

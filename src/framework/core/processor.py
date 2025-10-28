@@ -6,10 +6,10 @@ from typing import TYPE_CHECKING, Protocol, Type
 
 from pydantic import BaseModel
 
-from framework.result import PipelineResult
+from framework.core.result import PipelineResult
 
 if TYPE_CHECKING:
-    from framework.pipeline import PipelineConfig
+    from framework.core.pipeline import PipelineConfig
 
 
 class Processor(Protocol):

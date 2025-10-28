@@ -12,10 +12,10 @@ from typing import (
     TypeVar,
 )
 
-from schema import BaseClue, ValidationResult
+from framework.schema import BaseClue, ValidationResult
 
 if TYPE_CHECKING:
-    from framework.pipeline import PipelineConfig
+    from framework.core.pipeline import PipelineConfig
 
 
 ClueT = TypeVar("ClueT", bound=BaseClue)

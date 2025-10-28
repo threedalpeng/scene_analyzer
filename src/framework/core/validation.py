@@ -3,9 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Iterable, Mapping, Sequence
 
-from framework.base import ClueExtractor, NullValidator
-from framework.registry import ClueRegistry
-from schema import BaseClue, ValidationResult
+from framework.core.base import ClueExtractor, NullValidator
+from framework.core.registry import ClueRegistry
+from framework.schema import BaseClue, ValidationResult
 
 
 @dataclass(slots=True)
