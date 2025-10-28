@@ -13,8 +13,8 @@ from clues.tom import ToMClue
 from framework.core.processor import Processor
 from framework.core.result import PipelineResult
 from pydantic import BaseModel
-from framework.schema import AliasGroup, AliasGroups
 from framework.utils import norm_pair, parse_model
+from schema import AliasGroup, AliasGroups
 
 if TYPE_CHECKING:
     from framework.core.pipeline import PipelineConfig

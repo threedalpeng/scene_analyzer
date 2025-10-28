@@ -7,14 +7,14 @@ from pydantic import BaseModel, Field
 
 from framework.core.base import ClueValidator
 from framework.core.batch import BatchExtractor
-from framework.schema import (
+from framework.schema import ValidationResult
+from schema import (
     Durability,
     EvidenceClippingMixin,
     GoalAlignment,
     PairClue,
     Salience,
     Stakes,
-    ValidationResult,
     Volition,
 )
 from framework.utils import parse_model

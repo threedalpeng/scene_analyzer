@@ -13,8 +13,8 @@ from clues.act import ActClue, act_score, bundle_same_segment, explode_directed
 from clues.tom import ToMClue
 from framework.core.processor import Processor
 from framework.core.result import PipelineResult
-from framework.schema import LLMAdjudication
 from framework.utils import log_status, parse_model
+from schema import LLMAdjudication
 
 if TYPE_CHECKING:
     from framework.core.pipeline import PipelineConfig

@@ -6,7 +6,8 @@ from pydantic import BaseModel, Field
 
 from framework.core.base import ClueValidator
 from framework.core.batch import BatchExtractor
-from framework.schema import BaseClue, EvidenceClippingMixin, ValidationResult
+from framework.schema import BaseClue, ValidationResult
+from schema import EvidenceClippingMixin
 from framework.utils import parse_model
 
 if TYPE_CHECKING:
