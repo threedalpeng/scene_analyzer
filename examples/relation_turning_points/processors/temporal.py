@@ -123,10 +123,6 @@ class TemporalReconstructor(Processor):
         )
         return TemporalResult(fabula_rank=fabula)
 
-    def checkpoint_id(self) -> str:
-        cls = self.__class__
-        return f"{cls.__module__}.{cls.__qualname__}"
-
     @property
     def result_type(self) -> Type[TemporalResult]:
         return TemporalResult

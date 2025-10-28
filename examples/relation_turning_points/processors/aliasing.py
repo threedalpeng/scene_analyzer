@@ -60,10 +60,6 @@ class AliasResolver(Processor):
         alias_map = self._build_alias_map(final_groups)
         return AliasingResult(alias_groups=final_groups, alias_map=alias_map)
 
-    def checkpoint_id(self) -> str:
-        cls = self.__class__
-        return f"{cls.__module__}.{cls.__qualname__}"
-
     @staticmethod
     def from_clues(result: PipelineResult) -> AliasGroups:
         """
@@ -72,7 +68,7 @@ class AliasResolver(Processor):
         Useful for tests or when no client is available.
         """
         groups: dict[str, set[str]] = defaultdict(set)
-        for clue in result.get(EntityClue):
+        for clue in result.get_clues(EntityClue):
             canonical = clue.name
             groups[canonical].add(canonical)
             groups[canonical].update(clue.aliases_in_segment)
@@ -86,7 +82,7 @@ class AliasResolver(Processor):
     @staticmethod
     def _extract_from_entity_clues(result: PipelineResult) -> AliasGroups:
         groups: dict[str, set[str]] = defaultdict(set)
-        entities = result.get(EntityClue)
+        entities = result.get_clues(EntityClue)
         if not entities:
             return AliasGroups(groups=[])
 
@@ -109,7 +105,7 @@ class AliasResolver(Processor):
         unique_names: set[str] = set()
         appearances: dict[str, set[int]] = defaultdict(set)
 
-        for clue in [*result.get(ActClue), *result.get(ToMClue)]:
+        for clue in [*result.get_clues(ActClue), *result.get_clues(ToMClue)]:
             pair = clue.pair
             unique_names.update(pair)
             appearances[pair[0]].add(clue.segment)

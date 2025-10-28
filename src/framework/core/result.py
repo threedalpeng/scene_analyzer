@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import (
     Any,
@@ -10,33 +12,44 @@ from typing import (
     Sequence,
     Type,
     TypeVar,
-    overload,
+    cast,
 )
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from framework.schema import BaseClue, ValidationResult
 
-T = TypeVar("T")
 TOutput = TypeVar("TOutput", bound=BaseModel)
 BaseClueT = TypeVar("BaseClueT", bound=BaseClue)
 
 
-class ParticipantsOutput(BaseModel):
-    by_segment: dict[int, list[str]] = Field(default_factory=dict)
+@dataclass(slots=True)
+class ExecutionFailure:
+    """Record of a failure encountered during pipeline execution."""
 
-    def add(self, segment_id: int, names: Iterable[str]) -> None:
-        bucket = self.by_segment.setdefault(int(segment_id), [])
-        for name in names:
-            normalized = name.strip()
-            if not normalized:
-                continue
-            if normalized not in bucket:
-                bucket.append(normalized)
+    segment: int
+    stage: str
+    component: str
+    error: str
+    timestamp: str
 
 
 class PipelineResult:
-    """Container for extracted clues, processor outputs, and validation reports."""
+    """
+    Aggregate view of artifacts produced during a pipeline run.
+
+    A :class:`PipelineResult` stores the normalized input segments alongside
+    extracted clues, processor outputs, validation reports, execution failures,
+    and arbitrary context shared between stages. Collections returned by the
+    public getters are copies so downstream code can mutate them safely.
+
+    Examples:
+        >>> acts = result.get_clues(ActClue)
+        >>> synthesis = result.get_output(SynthesisResult)
+        >>> if result.failures:
+        ...     for failure in result.failures:
+        ...         print(failure.component, failure.error)
+    """
 
     def __init__(
         self,
@@ -49,27 +62,44 @@ class PipelineResult:
         self.validation: list[tuple[BaseClue, Sequence[ValidationResult]]] = []
         self.segments: list[dict[str, Any]] = [dict(item) for item in (segments or [])]
         self.context: dict[str, Any] = {}
+        self.failures: list[ExecutionFailure] = []
         if context:
             self.context.update(dict(context))
 
-    @overload
-    def get(self, t: Type[BaseClueT]) -> list[BaseClueT]: ...
+    def get_clues(self, clue_type: Type[BaseClueT]) -> list[BaseClueT]:
+        """
+        Return a copy of the clues stored for the given type.
 
-    @overload
-    def get(self, t: Type[T]) -> T | None: ...
+        The returned list is detached from internal storage so callers may
+        mutate it without affecting the backing collection.
+        """
 
-    def get(self, t: Type[Any]) -> Any:
-        """Type-based lookup for clues and processor outputs."""
+        if clue_type is BaseClue:
+            return cast(list[BaseClueT], list(self.all_clues))
+        bucket = self._clues.get(clue_type, [])
+        return cast(list[BaseClueT], list(bucket))
 
-        if isinstance(t, type) and issubclass(t, BaseClue):
-            if t is BaseClue:
-                return list(self.all_clues)
-            bucket = self._clues.get(t, [])
-            assert bucket is not None
-            return list(bucket)
-        value = self._outputs.get(t)
+    def set_clues(self, clue_type: Type[BaseClue], clues: Iterable[BaseClue]) -> None:
+        """Replace all stored clues for ``clue_type`` with ``clues``."""
+
+        self._clues[clue_type] = list(clues)
+
+    def add_clues(self, clue_type: Type[BaseClue], clues: Iterable[BaseClue]) -> None:
+        """Append ``clues`` to the collection stored for ``clue_type``."""
+
+        bucket = self._clues.setdefault(clue_type, [])
+        bucket.extend(clues)
+
+    def get_output(self, output_type: Type[TOutput]) -> TOutput | None:
+        """
+        Return the processor output matching ``output_type`` if available.
+
+        Outputs are stored by their concrete :class:`pydantic.BaseModel` type.
+        """
+
+        value = self._outputs.get(output_type)
         if value is not None:
-            assert isinstance(value, t)
+            assert isinstance(value, output_type)
         return value
 
     @property
@@ -79,16 +109,8 @@ class PipelineResult:
             out.extend(clues)
         return out
 
-    def put_clues(self, clue_type: Type[BaseClue], clues: Iterable[BaseClue]) -> None:
-        self._clues[clue_type] = list(clues)
-
-    def append_clues(
-        self, clue_type: Type[BaseClue], clues: Iterable[BaseClue]
-    ) -> None:
-        bucket = self._clues.setdefault(clue_type, [])
-        bucket.extend(clues)
-
     def put_output(self, output: TOutput) -> TOutput:
+        """Store a processor output, keyed by its concrete model type."""
         if not isinstance(output, BaseModel):
             raise TypeError(
                 f"Processor output must be a BaseModel, got {type(output).__name__}"
@@ -96,8 +118,33 @@ class PipelineResult:
         self._outputs[type(output)] = output
         return output
 
-    def clues_for(self, clue_type: Type[BaseClue]) -> list[BaseClue]:
-        return list(self._clues.get(clue_type, []))
+    def record_failure(
+        self,
+        segment: int,
+        stage: str,
+        component: str,
+        error: Exception | str,
+    ) -> None:
+        """
+        Record a failure encountered while executing the pipeline.
+
+        Args:
+            segment: Segment identifier associated with the failure, or ``0``
+                when the error is not segment-specific.
+            stage: Execution stage name (e.g., ``"extraction"``).
+            component: Extractor or processor responsible for the failure.
+            error: Exception or message describing the failure.
+        """
+
+        self.failures.append(
+            ExecutionFailure(
+                segment=int(segment),
+                stage=str(stage),
+                component=str(component),
+                error=str(error),
+                timestamp=datetime.now().isoformat(),
+            )
+        )
 
     @property
     def clue_index(self) -> Mapping[Type[BaseClue], Sequence[BaseClue]]:
@@ -114,13 +161,8 @@ class PipelineResult:
     def clear_outputs(self) -> None:
         self._outputs.clear()
 
-    def add_participants(self, segment_id: int, names: Iterable[str]) -> None:
-        participants = self.get(ParticipantsOutput)
-        if participants is None:
-            participants = self.put_output(ParticipantsOutput())
-        participants.add(segment_id, names)
-
     def merge_context(self, values: Mapping[str, Any]) -> None:
+        """Merge ``values`` into the shared context dictionary."""
         for key, value in values.items():
             self.context[key] = value
 
@@ -166,6 +208,7 @@ class PipelineResult:
         namespace: Literal["framework", "processor", "user"] = "user",
         default: Any | None = None,
     ) -> Any | None:
+        """Retrieve a namespaced context value."""
         full_key = f"{namespace}.{key}" if "." not in key else key
         return self.context.get(full_key, default)
 
@@ -189,4 +232,4 @@ class PipelineResult:
         return copy.deepcopy(self)
 
 
-__all__ = ["PipelineResult", "ParticipantsOutput"]
+__all__ = ["PipelineResult", "ExecutionFailure"]

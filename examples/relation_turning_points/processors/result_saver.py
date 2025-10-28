@@ -32,11 +32,7 @@ class ResultSaver(Processor):
 
     def configure(self, config: PipelineConfig) -> None:  # noqa: ARG002
         """ResultSaver does not require pipeline configuration."""
-        ...
-
-    @property
-    def result_type(self) -> None:
-        return None
+        pass
 
     def save(self, result: PipelineResult) -> None:
         """Write all known artifacts derived from `result`."""
@@ -46,17 +42,13 @@ class ResultSaver(Processor):
         log_status(f"Saving pipeline artifacts to {self.output_dir}")
         self._write_clue_files(result)
         self._write_validation(result)
-        self._write_aliasing(result.get(AliasingResult))
-        self._write_temporal(result.get(TemporalResult))
-        self._write_synthesis(result.get(SynthesisResult))
+        self._write_aliasing(result.get_output(AliasingResult))
+        self._write_temporal(result.get_output(TemporalResult))
+        self._write_synthesis(result.get_output(SynthesisResult))
 
     def __call__(self, result: PipelineResult) -> None:
         """Allow ResultSaver to be used as a pipeline processor."""
         self.save(result)
-
-    def checkpoint_id(self) -> str:
-        cls = self.__class__
-        return f"{cls.__module__}.{cls.__qualname__}"
 
     # --- clue + validation writers -------------------------------------------------
     def _write_clue_files(self, result: PipelineResult) -> None:
@@ -67,7 +59,7 @@ class ResultSaver(Processor):
             EntityClue: "entity_clues.jsonl",
         }
         for clue_type, filename in mapping.items():
-            records = [clue.model_dump() for clue in result.get(clue_type)]
+            records = [clue.model_dump() for clue in result.get_clues(clue_type)]
             jsonl_write(self.output_dir / filename, records)
 
     def _write_validation(self, result: PipelineResult) -> None:

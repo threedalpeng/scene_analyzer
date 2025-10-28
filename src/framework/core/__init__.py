@@ -2,7 +2,7 @@
 
 from .pipeline import Pipeline, PipelineConfig
 from .processor import Processor
-from .result import ParticipantsOutput, PipelineResult
+from .result import PipelineResult
 from .validation import ValidationPipeline
 
 __all__ = [
@@ -11,5 +11,4 @@ __all__ = [
     "PipelineResult",
     "ValidationPipeline",
     "Processor",
-    "ParticipantsOutput",
 ]

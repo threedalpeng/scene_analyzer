@@ -10,14 +10,30 @@ from framework.schema import BaseClue, ValidationResult
 
 @dataclass(slots=True)
 class ValidationContext:
-    """Context for coherence validation."""
+    """
+    Shared inputs for semantic and coherence validation passes.
+
+    Attributes:
+        known_segments: Segment identifiers considered valid.
+        known_clue_ids: Optional set of clue IDs used to resolve references.
+    """
 
     known_segments: set[int]
     known_clue_ids: set[str] = field(default_factory=set)
 
 
 class ValidationPipeline:
-    """Apply structural → semantic → coherence validation layers."""
+    """
+    Apply structural, semantic, and coherence validation to extracted clues.
+
+    Validation runs in three phases:
+
+    1. Structural checks: ensure required fields are present and well-formed.
+    2. Semantic checks: invoke domain-specific validators registered in the
+       :class:`ClueRegistry`.
+    3. Coherence checks: verify cross-clue references using the supplied
+       :class:`ValidationContext`.
+    """
 
     def __init__(self, registry: ClueRegistry | None = None) -> None:
         self._registry = registry
@@ -36,6 +52,17 @@ class ValidationPipeline:
     def validate_clue(
         self, clue: BaseClue, *, context: ValidationContext | None = None
     ) -> Sequence[ValidationResult]:
+        """
+        Validate a single clue across structural, semantic, and coherence layers.
+
+        Args:
+            clue: Clue instance to validate.
+            context: Optional coherence context describing known segments and IDs.
+
+        Returns:
+            Ordered sequence of :class:`ValidationResult` records. The list may
+            be truncated if an earlier stage fails.
+        """
         results: list[ValidationResult] = []
 
         structural = self._validate_structural(clue)
@@ -76,6 +103,16 @@ class ValidationPipeline:
     def validate_batch(
         self, clues: Iterable[BaseClue], *, context: ValidationContext | None = None
     ) -> list[tuple[BaseClue, Sequence[ValidationResult]]]:
+        """
+        Validate multiple clues, preserving their association with results.
+
+        Args:
+            clues: Iterable of clues to validate.
+            context: Optional coherence context propagated to each call.
+
+        Returns:
+            List of tuples pairing each clue with its validation results.
+        """
         return [(clue, self.validate_clue(clue, context=context)) for clue in clues]
 
     @staticmethod

@@ -34,6 +34,24 @@ ValidationMarker = tuple[Literal["validate"], bool | None]
 
 
 class Pipeline:
+    """
+    Coordinate clue extraction, post-processing, and validation stages.
+
+    A pipeline is configured by chaining extractor, processor, and optional
+    checkpoint or validation markers before invoking :meth:`run`. Stages execute
+    sequentially over the provided segment list, sharing state through a
+    :class:`PipelineResult` instance.
+
+    Examples:
+        >>> pipeline = Pipeline(PipelineConfig())
+        >>> pipeline.extract([ActExtractor, ToMExtractor])
+        ...         .process(AliasResolver())
+        ...         .validate(strict=True)
+        >>> result = pipeline.run(
+        ...     segments=[{"segment": 1, "text": "Scene 1"}],
+        ... )
+    """
+
     def __init__(
         self,
         config: PipelineConfig | None = None,
@@ -56,6 +74,21 @@ class Pipeline:
         /,
         **params: Any,
     ) -> "Pipeline":
+        """
+        Register one or more clue extractor stages.
+
+        Args:
+            extractor: Extractor class, instance, or list of batch extractors.
+            **params: Keyword arguments forwarded to the extractor constructor
+                when a class is supplied.
+
+        Returns:
+            The pipeline instance (for fluent chaining).
+
+        Raises:
+            ValueError: If keyword parameters are provided for a list input.
+            TypeError: If a combined list contains non-batch extractors.
+        """
         if isinstance(extractor, list):
             if params:
                 raise ValueError(
@@ -80,10 +113,25 @@ class Pipeline:
         return self
 
     def process(self, processor: Processor) -> "Pipeline":
+        """
+        Append a processor stage that operates on accumulated results.
+
+        Args:
+            processor: Processor instance to append.
+
+        Returns:
+            The pipeline instance to enable chaining.
+        """
         self._stages.append(processor)
         return self
 
     def pipe(self, other: "Pipeline") -> "Pipeline":
+        """
+        Append all stages from another pipeline instance.
+
+        The supplied pipeline is not mutated; shallow copies of extractor stage
+        lists are taken to avoid shared state between pipelines.
+        """
         for stage in other._stages:
             if isinstance(stage, list):
                 new_stage = list(stage)
@@ -101,12 +149,20 @@ class Pipeline:
         return self
 
     def checkpoint(self, name: str) -> "Pipeline":
+        """Insert a named checkpoint marker into the execution plan."""
         if not name:
             raise ValueError("Checkpoint name must be a non-empty string")
         self._stages.append(("checkpoint", name))
         return self
 
     def validate(self, *, strict: bool | None = None) -> "Pipeline":
+        """
+        Insert a validation marker executed after preceding stages.
+
+        Args:
+            strict: Override for strict-mode enforcement. If ``None``, the
+                pipeline configuration decides whether validation errors raise.
+        """
         self._stages.append(("validate", strict))
         return self
 
@@ -114,7 +170,6 @@ class Pipeline:
         self,
         segments: list[dict],
         *,
-        metadata: dict[int, dict] | None = None,
         context: Mapping[str, Any] | None = None,
         checkpoint_dir: Path | None = None,
         load_checkpoint: Path | None = None,
@@ -122,12 +177,36 @@ class Pipeline:
         stop_at: str | None = None,
         auto_save: bool = False,
     ) -> PipelineResult:
+        """
+        Execute the configured pipeline over the provided segments.
+
+        Args:
+            segments: List of segment dictionaries. Each entry must include
+                ``segment`` (int identifier) and ``text`` (string content). Any
+                additional metadata can be stored alongside these keys.
+            context: Optional global context dictionary shared across stages.
+            checkpoint_dir: Directory used for checkpoint persistence when
+                ``auto_save`` is enabled.
+            load_checkpoint: Resume from a serialized :class:`PipelineResult`.
+            resume_from: Skip execution until the named checkpoint is reached.
+            stop_at: Halt execution after the named checkpoint completes.
+            auto_save: When ``True``, automatically persist checkpoints to
+                ``checkpoint_dir``.
+
+        Returns:
+            :class:`PipelineResult` containing accumulated clues, processor
+            outputs, validation reports, failures, and context.
+
+        Raises:
+            ValueError: If no segments are provided and no checkpoint is loaded.
+            ValueError: If ``resume_from`` references an unknown checkpoint.
+            RuntimeError: If strict validation is enabled and errors are found.
+        """
         if not segments and load_checkpoint is None:
             raise ValueError("Pipeline requires at least one segment")
 
-        metadata = metadata or {}
         result, derived_resume = self._initialize_result(
-            segments, metadata, context, load_checkpoint
+            segments, context, load_checkpoint
         )
         effective_resume = resume_from or derived_resume
 
@@ -189,33 +268,21 @@ class Pipeline:
     def _initialize_result(
         self,
         segments: list[dict],
-        metadata: Mapping[int, Mapping[str, Any]],
         context: Mapping[str, Any] | None,
         load_checkpoint: Path | None,
     ) -> tuple[PipelineResult, str | None]:
-        segment_metadata = {int(k): dict(v) for k, v in (metadata or {}).items()}
-
         if load_checkpoint:
             result = PipelineResult.load(load_checkpoint)
             if context:
                 result.merge_context(dict(context))
-            if segment_metadata:
-                result.merge_context(
-                    {"framework.core.segment_metadata": segment_metadata}
-                )
             return result, load_checkpoint.stem
 
         if not segments:
             raise ValueError("Pipeline requires at least one segment")
 
         result = PipelineResult(segments=[dict(item) for item in segments])
-        base_context: dict[str, Any] = {}
-        if segment_metadata:
-            base_context["framework.core.segment_metadata"] = segment_metadata
         if context:
-            base_context.update(dict(context))
-        if base_context:
-            result.merge_context(base_context)
+            result.merge_context(dict(context))
         return result, None
 
     def _register_extractor_stage(
@@ -240,45 +307,65 @@ class Pipeline:
         ]
 
         for extractor in extractors:
-            extractor.configure(self.config)
+            component_name = extractor.__class__.__name__
+            try:
+                extractor.configure(self.config)
+            except Exception as err:
+                result.record_failure(0, "extraction", component_name, err)
+                raise
+            extractor.set_failure_recorder(
+                lambda segment_id, message, component=component_name: result.record_failure(
+                    segment_id, "extraction", component, message
+                )
+            )
+            try:
+                if isinstance(extractor, BatchExtractor):
+                    if not entries:
+                        continue
+                    batch_size = max(1, extractor.effective_batch_size())
+                    for idx in range(0, len(entries), batch_size):
+                        batch = entries[idx : idx + batch_size]
+                        try:
+                            clues = extractor.batch_extract(batch)
+                        except Exception as err:
+                            result.record_failure(0, "extraction", component_name, err)
+                            raise
+                        self._merge_extractor_output(extractor, clues, result)
 
-            if isinstance(extractor, BatchExtractor):
-                if not entries:
-                    continue
-                batch_size = max(1, extractor.effective_batch_size())
-                for idx in range(0, len(entries), batch_size):
-                    batch = entries[idx : idx + batch_size]
-                    clues = extractor.batch_extract(batch)
-                    self._merge_extractor_output(extractor, clues, result)
-
-                    participants = extractor.participants()
-                    for segment_id, _ in batch:
-                        names = participants.get(segment_id)
-                        if names:
-                            result.add_participants(segment_id, names)
-            else:
-                for segment_id, text in entries:
-                    clues = extractor.extract(text, segment_id)
-                    result.append_clues(extractor.clue_type, clues)
+                    self._store_participants(result, extractor.participants())
+                else:
+                    for segment_id, text in entries:
+                        try:
+                            clues = extractor.extract(text, segment_id)
+                        except Exception as err:
+                            result.record_failure(
+                                segment_id, "extraction", component_name, err
+                            )
+                            raise
+                        result.add_clues(extractor.clue_type, clues)
+                    self._store_participants(result, extractor.participants())
+            finally:
+                extractor.set_failure_recorder(None)
 
     def _run_processor_stage(
         self, processor: Processor, result: PipelineResult
     ) -> None:
-        processor.configure(self.config)
-        output = processor(result)
+        try:
+            processor.configure(self.config)
+        except Exception as err:
+            result.record_failure(0, "processing", processor.__class__.__name__, err)
+            raise
+        try:
+            output = processor(result)
+        except Exception as err:
+            result.record_failure(0, "processing", processor.__class__.__name__, err)
+            raise
         if output is not None:
             result.put_output(output)
 
     @staticmethod
     def _is_processor_stage(stage: Any) -> TypeGuard[Processor]:
-        return (
-            hasattr(stage, "configure")
-            and callable(getattr(stage, "configure"))
-            and callable(getattr(stage, "__call__", None))
-            and hasattr(stage, "checkpoint_id")
-            and callable(getattr(stage, "checkpoint_id"))
-            and hasattr(stage, "result_type")
-        )
+        return isinstance(stage, Processor)
 
     def _run_validation_stage(
         self, strict: bool | None, result: PipelineResult
@@ -306,6 +393,29 @@ class Pipeline:
                 summary = f"Validation failed: {len(errors)} error(s) found"
                 raise ValueError(summary + "\n" + "\n".join(errors))
 
+    @staticmethod
+    def _store_participants(
+        result: PipelineResult, participants: Mapping[int, Sequence[str]]
+    ) -> None:
+        if not participants:
+            return
+
+        key = "framework.participants"
+        existing = result.context.get(key)
+        if not isinstance(existing, dict):
+            existing = {}
+            result.context[key] = existing
+
+        for segment_id, names in participants.items():
+            if not names:
+                continue
+            bucket = existing.setdefault(int(segment_id), [])
+            for name in names:
+                normalized = name.strip()
+                if not normalized or normalized in bucket:
+                    continue
+                bucket.append(normalized)
+
     def _merge_extractor_output(
         self,
         extractor: ClueExtractor,
@@ -322,6 +432,6 @@ class Pipeline:
             for clue in clues:
                 buckets[type(clue)].append(clue)
             for clue_type, items in buckets.items():
-                result.append_clues(clue_type, items)
+                result.add_clues(clue_type, items)
         else:
-            result.append_clues(extractor.clue_type, clues)
+            result.add_clues(extractor.clue_type, clues)

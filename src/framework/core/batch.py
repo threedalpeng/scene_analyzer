@@ -190,19 +190,24 @@ class BatchExtractor(ClueExtractor[ClueT], ABC):
     ) -> list[ClueT] | None:
         """Process a single response from the batch job."""
         prefix = f"{self._clue_slug.upper()} batch {batch_idx}/{total}: inline {idx}"
+        try:
+            segment_id = int(segment_dict["segment"])
+        except (KeyError, TypeError, ValueError):
+            segment_id = -1
 
         if resp.error:
             log_status(f"{prefix} error -> {resp.error}")
+            self._record_failure(segment_id, resp.error)
             return None
 
         parsed = getattr(resp.response, "parsed", None) if resp.response else None
         raw_payload = parsed or getattr(resp.response, "text", None)
         if raw_payload is None:
             log_status(f"{prefix} empty response")
+            self._record_failure(segment_id, "empty response payload")
             return None
 
         try:
-            segment_id = int(segment_dict["segment"])
             participants, clues = self._parse_response(raw_payload, segment_id)
             clues = self._assign_ids(segment_id, clues)
             if participants:
@@ -211,6 +216,7 @@ class BatchExtractor(ClueExtractor[ClueT], ABC):
             return clues
         except (ValidationError, Exception) as err:
             log_status(f"{prefix} parse error -> {err}")
+            self._record_failure(segment_id, err)
             return None
 
     def _assign_ids(self, segment_id: int, clues: list[ClueT]) -> list[ClueT]:
@@ -270,7 +276,7 @@ class BatchExtractor(ClueExtractor[ClueT], ABC):
         return self._response_schema_single
 
     def get_prompt_section(self) -> str:
-        """Legacy method for backward compatibility with prompt builders."""
+        """Return a formatted prompt section for prompt builders."""
         spec = self.get_clue_specification()
         sections = [
             f"## {spec['display_name']}",

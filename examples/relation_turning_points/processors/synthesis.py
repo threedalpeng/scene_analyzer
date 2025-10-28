@@ -194,8 +194,8 @@ class DyadSynthesizer(Processor):
             )
 
     def __call__(self, result: PipelineResult) -> SynthesisResult:
-        acts = result.get(ActClue)
-        toms = result.get(ToMClue)
+        acts = result.get_clues(ActClue)
+        toms = result.get_clues(ToMClue)
         acts_representative = bundle_same_segment(acts)
         acts_directed = explode_directed(acts)
         bags = build_bags(toms, acts_representative, acts_directed)
@@ -213,10 +213,6 @@ class DyadSynthesizer(Processor):
             acts_directed=acts_directed,
             dyads=dyads,
         )
-
-    def checkpoint_id(self) -> str:
-        cls = self.__class__
-        return f"{cls.__module__}.{cls.__qualname__}"
 
     @property
     def result_type(self) -> Type[SynthesisResult]:

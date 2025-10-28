@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from typing import (
     TYPE_CHECKING,
     Any,
+    Callable,
     Generic,
     Iterable,
     Mapping,
@@ -22,31 +23,65 @@ ClueT = TypeVar("ClueT", bound=BaseClue)
 
 
 class ClueValidator(ABC):
-    """Domain-specific validation hooks for a clue extractor."""
+    """
+    Domain validator returned by :class:`ClueExtractor` implementations.
+
+    Subclasses implement semantic and (optionally) coherence checks that run
+    after structural validation has passed.
+    """
 
     @abstractmethod
     def validate_semantic(self, clue: BaseClue) -> ValidationResult:
-        """Validate semantic rules for a single clue."""
+        """Validate domain-specific rules for a single clue."""
 
     def validate_coherence(
         self, clue: BaseClue, context: Mapping[str, Any] | None = None
     ) -> ValidationResult | None:
-        """Optional cross-clue validation; return None to skip."""
+        """
+        Optionally validate cross-clue coherence.
+
+        Return ``None`` to skip if no coherence logic is required.
+        """
 
         _ = clue, context
         return None
 
 
 class ClueExtractor(Generic[ClueT], ABC):
-    """Interface for pluggable clue extractors."""
+    """
+    Base class for pluggable clue extractors.
+
+    Extractors transform raw segment text into structured clue objects. The
+    default implementation supports either single-segment extraction via
+    :meth:`extract` or batch extraction via :meth:`batch_extract`.
+    """
 
     def __init__(self) -> None:
         self._configured = False
+        self._failure_recorder: Callable[[int, str], None] | None = None
 
     def configure(self, config: "PipelineConfig") -> None:
-        """Inject shared pipeline configuration before extraction."""
+        """
+        Inject shared pipeline configuration before extraction begins.
+
+        Subclasses should override this method to capture values from the
+        pipeline configuration (for example, LLM clients or batch sizes) and
+        must call ``super().configure(config)`` if the default bookkeeping is
+        required.
+        """
 
         self._configured = True
+
+    def set_failure_recorder(
+        self, recorder: Callable[[int, str], None] | None
+    ) -> None:
+        """Attach a callback that records per-segment extraction failures."""
+
+        self._failure_recorder = recorder
+
+    def _record_failure(self, segment_id: int, error: Exception | str) -> None:
+        if self._failure_recorder:
+            self._failure_recorder(int(segment_id), str(error))
 
     @property
     @abstractmethod
@@ -58,7 +93,12 @@ class ClueExtractor(Generic[ClueT], ABC):
         """Extract clues from a single segment."""
 
     def batch_extract(self, items: Iterable[tuple[int, str]]) -> Sequence[ClueT]:
-        """Optional batch extraction hook; defaults to sequential extract calls."""
+        """
+        Optional batch extraction hook.
+
+        The default implementation falls back to sequential :meth:`extract`
+        calls for each ``(segment_id, text)`` pair supplied.
+        """
 
         outputs: list[ClueT] = []
         for segment_id, text in items:
@@ -66,22 +106,31 @@ class ClueExtractor(Generic[ClueT], ABC):
         return outputs
 
     def score(self, clue: ClueT) -> float:
-        """Relative importance for bundling/selection; defaults to 0."""
+        """Relative importance used for downstream ranking; defaults to ``0``."""
 
         _ = clue
         return 0.0
 
     def validator(self) -> ClueValidator:
-        """Return semantic validator for this extractor."""
+        """Return the semantic/coherence validator for this extractor."""
 
         return NullValidator()
 
     def participants(self) -> Mapping[int, list[str]]:
-        """Return participants by segment; defaults to empty dict."""
+        """
+        Return detected participant names keyed by segment id.
+
+        The default implementation returns an empty mapping.
+        """
         return {}
 
     def registry_members(self) -> Sequence["ClueExtractor[Any]"]:
-        """Return extractors that should be registered for validation."""
+        """
+        Return extractors that should be registered for validation.
+
+        Override when a batch extractor wraps multiple extractor instances that
+        expose their own validators.
+        """
         return [self]
 
     def checkpoint_id(self) -> str:
