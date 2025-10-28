@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 
 class BatchExtractor(ClueExtractor[ClueT], ABC):
-    """Template for extractors that operate over scene batches via LLM jobs."""
+    """Template for extractors that operate over segment batches via LLM jobs."""
 
     batch_size: int = 50
     _clue_slug: str = ""
@@ -29,13 +29,13 @@ class BatchExtractor(ClueExtractor[ClueT], ABC):
         self._client: genai.Client | None = None
         self._batch_size: int | None = None
         self._id_counters: defaultdict[int, int] = defaultdict(int)
-        self._completed_scenes: set[int] = set()
+        self._completed_segments: set[int] = set()
         self._response_schema_single: type[BaseModel] | None = None
         self._system_prompt_single: str | None = None
 
     @abstractmethod
     def _parse_response(
-        self, raw_payload: Any, scene_id: int
+        self, raw_payload: Any, segment_id: int
     ) -> tuple[list[str], list[ClueT]]:
         """Parse API response into (participants, clues)."""
 
@@ -50,31 +50,31 @@ class BatchExtractor(ClueExtractor[ClueT], ABC):
     def participants(self) -> Mapping[int, list[str]]:
         return self._participants
 
-    def extract(self, scene_text: str, scene_id: int) -> Sequence[ClueT]:
-        return self.batch_extract([(scene_id, scene_text)])
+    def extract(self, segment_text: str, segment_id: int) -> Sequence[ClueT]:
+        return self.batch_extract([(segment_id, segment_text)])
 
     def batch_extract(self, items: Iterable[tuple[int, str]]) -> Sequence[ClueT]:
-        scenes = [
-            {"scene": sid, "text": txt}
+        segments = [
+            {"segment": sid, "text": txt}
             for sid, txt in items
-            if int(sid) not in self._completed_scenes
+            if int(sid) not in self._completed_segments
         ]
-        return self._run_batch(scenes)
+        return self._run_batch(segments)
 
     def effective_batch_size(self) -> int:
         return self._batch_size or self.batch_size
 
     def _build_inline_requests(
-        self, scenes: list[dict]
+        self, segments: list[dict]
     ) -> list[types.InlinedRequestDict]:
-        """Build Gemini API requests for a batch of scenes."""
+        """Build Gemini API requests for a batch of segments."""
 
         system_prompt = self._build_system_prompt_single()
         schema = self._build_response_schema()
 
         requests: list[types.InlinedRequestDict] = []
-        for item in scenes:
-            sid = int(item["scene"])
+        for item in segments:
+            sid = int(item["segment"])
             text = str(item["text"])
             requests.append(
                 types.InlinedRequestDict(
@@ -93,10 +93,10 @@ class BatchExtractor(ClueExtractor[ClueT], ABC):
             )
         return requests
 
-    def _run_batch(self, scenes: list[dict]) -> list[ClueT]:
+    def _run_batch(self, segments: list[dict]) -> list[ClueT]:
         """Common batch processing logic using Template Method pattern."""
         outputs: list[ClueT] = []
-        if not scenes:
+        if not segments:
             return outputs
         if self._client is None:
             raise ValueError(
@@ -104,16 +104,16 @@ class BatchExtractor(ClueExtractor[ClueT], ABC):
             )
 
         chunk = self._batch_size or 10
-        total = (len(scenes) + chunk - 1) // chunk
+        total = (len(segments) + chunk - 1) // chunk
 
-        for i in range(0, len(scenes), chunk):
-            sub = scenes[i : i + chunk]
+        for i in range(0, len(segments), chunk):
+            sub = segments[i : i + chunk]
             batch_idx = (i // chunk) + 1
 
             # Submit batch
             log_status(
                 f"{self._clue_slug.upper()} batch {batch_idx}/{total}: "
-                f"submitting {len(sub)} scenes"
+                f"submitting {len(sub)} segments"
             )
             inlined = self._build_inline_requests(sub)
             job = self._client.batches.create(
@@ -134,14 +134,14 @@ class BatchExtractor(ClueExtractor[ClueT], ABC):
 
             successful_ids: list[int] = []
             for idx, resp in enumerate(bj.dest.inlined_responses, start=1):
-                _scene_id = int(sub[idx - 1]["scene"])
+                _segment_id = int(sub[idx - 1]["segment"])
                 result = self._process_single_response(
                     resp, sub[idx - 1], batch_idx, total, idx
                 )
                 if result:
                     outputs.extend(result)
-                    scene_success = int(sub[idx - 1]["scene"])
-                    successful_ids.append(scene_success)
+                    segment_success = int(sub[idx - 1]["segment"])
+                    successful_ids.append(segment_success)
 
         return outputs
 
@@ -183,7 +183,7 @@ class BatchExtractor(ClueExtractor[ClueT], ABC):
     def _process_single_response(
         self,
         resp: Any,
-        scene_dict: dict,
+        segment_dict: dict,
         batch_idx: int,
         total: int,
         idx: int,
@@ -202,30 +202,30 @@ class BatchExtractor(ClueExtractor[ClueT], ABC):
             return None
 
         try:
-            scene_id = int(scene_dict["scene"])
-            participants, clues = self._parse_response(raw_payload, scene_id)
-            clues = self._assign_ids(scene_id, clues)
+            segment_id = int(segment_dict["segment"])
+            participants, clues = self._parse_response(raw_payload, segment_id)
+            clues = self._assign_ids(segment_id, clues)
             if participants:
-                self._participants[scene_id] = participants
-            self._completed_scenes.add(scene_id)
+                self._participants[segment_id] = participants
+            self._completed_segments.add(segment_id)
             return clues
         except (ValidationError, Exception) as err:
             log_status(f"{prefix} parse error -> {err}")
             return None
 
-    def _assign_ids(self, scene_id: int, clues: list[ClueT]) -> list[ClueT]:
+    def _assign_ids(self, segment_id: int, clues: list[ClueT]) -> list[ClueT]:
         """Assign unique IDs to clues."""
         assigned: list[ClueT] = []
         for clue in clues:
-            self._id_counters[scene_id] += 1
+            self._id_counters[segment_id] += 1
             new_id = (
-                f"{self._clue_slug}_{scene_id:03d}_{self._id_counters[scene_id]:04d}"
+                f"{self._clue_slug}_{segment_id:03d}_{self._id_counters[segment_id]:04d}"
             )
             assigned.append(clue.model_copy(update={"id": new_id}))
         return assigned
 
     def _parse_clue_list(
-        self, clue_list: Sequence[Mapping[str, Any] | BaseModel], scene_id: int
+        self, clue_list: Sequence[Mapping[str, Any] | BaseModel], segment_id: int
     ) -> tuple[list[str], list[ClueT]]:
         """Parse a subset of clues when part of a combined response."""
         serialized: list[Mapping[str, Any]] = []
@@ -239,7 +239,7 @@ class BatchExtractor(ClueExtractor[ClueT], ABC):
             "participants": [],
             f"{self._clue_slug}_clues": serialized,
         }
-        return self._parse_response(payload, scene_id)
+        return self._parse_response(payload, segment_id)
 
     # ------------------------------------------------------------------
     # Prompt + schema helpers
@@ -250,8 +250,11 @@ class BatchExtractor(ClueExtractor[ClueT], ABC):
             self._system_prompt_single = build_system_prompt([spec])
         return self._system_prompt_single
 
-    def _user_prompt(self, scene_id: int, text: str) -> str:
-        return f"SCENE_ID: {scene_id}\nTEXT:\n{text}\n\nExtract all applicable clues."
+    def _user_prompt(self, segment_id: int, text: str) -> str:
+        return (
+            f"SEGMENT_ID: {segment_id}\nTEXT:\n{text}\n\n"
+            "Extract all applicable clues."
+        )
 
     def _build_response_schema(self) -> Type[BaseModel]:
         if self._response_schema_single is None:
@@ -346,12 +349,12 @@ class CombinedBatchExtractor(BatchExtractor[BaseClue]):
         return self._response_schema
 
     def _build_inline_requests(
-        self, scenes: list[dict]
+        self, segments: list[dict]
     ) -> list[types.InlinedRequestDict]:
         schema, system_prompt = self._ensure_assets()
         requests: list[types.InlinedRequestDict] = []
-        for item in scenes:
-            sid = int(item["scene"])
+        for item in segments:
+            sid = int(item["segment"])
             text = str(item["text"])
             requests.append(
                 types.InlinedRequestDict(
@@ -360,7 +363,7 @@ class CombinedBatchExtractor(BatchExtractor[BaseClue]):
                             "role": "user",
                             "parts": [
                                 {
-                                    "text": f"SCENE_ID: {sid}\nTEXT:\n{text}\n\n"
+                                    "text": f"SEGMENT_ID: {sid}\nTEXT:\n{text}\n\n"
                                     "Extract every requested clue type."
                                 }
                             ],
@@ -376,7 +379,7 @@ class CombinedBatchExtractor(BatchExtractor[BaseClue]):
         return requests
 
     def _parse_response(
-        self, raw_payload: Any, scene_id: int
+        self, raw_payload: Any, segment_id: int
     ) -> tuple[list[str], list[BaseClue]]:
         schema, _ = self._ensure_assets()
         payload_model = parse_model(schema, raw_payload)
@@ -387,19 +390,19 @@ class CombinedBatchExtractor(BatchExtractor[BaseClue]):
         for extractor in self._sub_extractors:
             slug = extractor._clue_slug
             clue_items = payload.get(f"{slug}_clues", [])
-            participants, clues = extractor._parse_clue_list(clue_items, scene_id)
+            participants, clues = extractor._parse_clue_list(clue_items, segment_id)
             combined_participants.update(participants)
             combined_clues.extend(clues)
 
         return sorted(combined_participants), combined_clues
 
-    def _assign_ids(self, scene_id: int, clues: list[BaseClue]) -> list[BaseClue]:
+    def _assign_ids(self, segment_id: int, clues: list[BaseClue]) -> list[BaseClue]:
         assigned: list[BaseClue] = []
         for clue in clues:
             slug = getattr(clue, "clue_type", "") or self._clue_slug
             counters = self._slug_counters[slug]
-            counters[scene_id] += 1
-            new_id = f"{slug}_{scene_id:03d}_{counters[scene_id]:04d}"
+            counters[segment_id] += 1
+            new_id = f"{slug}_{segment_id:03d}_{counters[segment_id]:04d}"
             assigned.append(clue.model_copy(update={"id": new_id}))
         return assigned
 

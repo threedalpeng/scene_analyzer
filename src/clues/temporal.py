@@ -23,15 +23,15 @@ class TemporalValidator(ClueValidator):
     ) -> ValidationResult | None:
         if context is None:
             return None
-        references = getattr(clue, "references_scenes", [])
-        known = context.get("known_scenes", set())
+        references = getattr(clue, "referenced_segments", [])
+        known = context.get("known_segments", set())
         known_set = set(known) if isinstance(known, (set, list, tuple)) else set()
         missing = [ref for ref in references if ref not in known_set]
         if missing:
             return ValidationResult.ok(
                 level="coherence",
                 warnings=[
-                    "temporal clue references unknown scene ids: "
+                    "temporal clue references unknown segment ids: "
                     + ", ".join(str(m) for m in missing)
                 ],
             )
@@ -60,11 +60,11 @@ class TemporalExtractor(BatchExtractor):
         return {
             "clue_type": "temporal",
             "display_name": "TEMPORAL CLUES",
-            "purpose": "Chronological relationships between scenes to reconstruct fabula from syuzhet.",
+            "purpose": "Chronological relationships between segments to reconstruct fabula from syuzhet.",
             "concepts": [
                 (
-                    "References_scenes",
-                    "Which earlier scenes this scene explicitly references or continues.",
+                    "Referenced_segments",
+                    "Which earlier segments this segment explicitly references or continues.",
                 ),
                 (
                     "Time_offset",
@@ -72,7 +72,7 @@ class TemporalExtractor(BatchExtractor):
                 ),
                 (
                     "Is_flashback",
-                    "True when the scene is presented out of chronological order.",
+                    "True when the segment is presented out of chronological order.",
                 ),
             ],
             "special_rules": [
@@ -83,7 +83,7 @@ class TemporalExtractor(BatchExtractor):
         }
 
     def _parse_response(
-        self, raw_payload: Any, scene_id: int
+        self, raw_payload: Any, segment_id: int
     ) -> tuple[list[str], list["TemporalClue"]]:
         schema_model = self._build_response_schema()
         payload_model = parse_model(schema_model, raw_payload)
@@ -113,17 +113,16 @@ class TemporalExtractor(BatchExtractor):
 
 class TemporalClue(BaseClue):
     clue_type: Literal["temporal"] = "temporal"
-    references_scenes: list[int] = Field(default_factory=list)
     time_offset: int | None = None
     is_flashback: bool
 
 
 class TemporalClueAPI(EvidenceClippingMixin):
     id: str | None = None
-    scene: int
+    segment: int
     clue_type: Literal["temporal"] = "temporal"
     evidence: str
-    references_scenes: list[int] = Field(default_factory=list)
+    referenced_segments: list[int] = Field(default_factory=list)
     time_offset: int | None = None
     is_flashback: bool
 

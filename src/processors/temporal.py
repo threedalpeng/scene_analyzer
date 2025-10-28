@@ -26,36 +26,36 @@ class TemporalResult(BaseModel):
 
 
 class FabulaReconstructor:
-    """Reconstruct chronological scene order from heterogeneous clues."""
+    """Reconstruct chronological segment order from heterogeneous clues."""
 
     def reconstruct(
         self,
-        scenes: Iterable[int],
+        segments: Iterable[int],
         clues: Sequence[BaseClue],
         input_metadata: dict[int, dict],
     ) -> dict[int, int]:
-        nodes = list(dict.fromkeys(int(s) for s in scenes))
+        nodes = list(dict.fromkeys(int(s) for s in segments))
         edges: list[Edge] = []
 
-        for scene_id in nodes:
-            refs = input_metadata.get(scene_id, {}).get("references_scenes", [])
+        for segment_id in nodes:
+            refs = input_metadata.get(segment_id, {}).get(
+                "referenced_segments", []
+            )
             for ref in refs:
-                edges.append(Edge(int(ref), scene_id, weight=1.0))
+                edges.append(Edge(int(ref), segment_id, weight=1.0))
 
         for clue in clues:
             if getattr(clue, "clue_type", "") == "temporal":
-                for ref in getattr(clue, "references_scenes", []):
-                    edges.append(Edge(int(ref), int(clue.scene), weight=0.8))
+                for ref in getattr(clue, "referenced_segments", []):
+                    edges.append(Edge(int(ref), int(clue.segment), weight=0.8))
 
         for clue in clues:
             if getattr(clue, "clue_type", "") == "act":
-                axes = getattr(clue, "axes", None)
-                consequence_refs = getattr(axes, "consequence_refs", []) if axes else []
-                for ref in consequence_refs:
-                    edges.append(Edge(int(clue.scene), int(ref), weight=0.6))
+                for ref in getattr(clue, "referenced_segments", []):
+                    edges.append(Edge(int(clue.segment), int(ref), weight=0.6))
 
         order = self._topological_sort(nodes, edges)
-        return {scene_id: idx for idx, scene_id in enumerate(order)}
+        return {segment_id: idx for idx, segment_id in enumerate(order)}
 
     @staticmethod
     def _topological_sort(nodes: list[int], edges: Sequence[Edge]) -> list[int]:
@@ -97,7 +97,7 @@ class FabulaReconstructor:
 
 class TemporalReconstructor(Processor):
     """
-    Reconstruct chronological scene order (fabula) from narrative order (syuzhet).
+    Reconstruct chronological segment order (fabula) from narrative order (syuzhet).
 
     Requirements: None — relies on graph-based topological sorting only.
 
@@ -112,9 +112,15 @@ class TemporalReconstructor(Processor):
         _ = config
 
     def __call__(self, result: PipelineResult) -> TemporalResult:
-        scenes = [int(item["scene"]) for item in result.scenes]
-        metadata = result.metadata or {}
-        fabula = self._engine.reconstruct(scenes, result.all_clues, metadata)
+        segments = [int(item["segment"]) for item in result.segments]
+        metadata = result.get_context(
+            "segment_metadata", namespace="framework", default={}
+        )
+        fabula = self._engine.reconstruct(
+            segments,
+            result.all_clues,
+            metadata if isinstance(metadata, dict) else {},
+        )
         return TemporalResult(fabula_rank=fabula)
 
     def checkpoint_id(self) -> str:

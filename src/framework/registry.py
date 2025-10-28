@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, Iterable, Iterator, Type
+from typing import Iterable, Iterator, Type
 
 from framework.base import ClueExtractor
 from schema import BaseClue
@@ -10,8 +10,8 @@ class ClueRegistry:
     """Registry that keeps track of available clue extractors."""
 
     def __init__(self) -> None:
-        self._extractors: Dict[type[BaseClue], ClueExtractor] = {}
-        self._type_by_name: Dict[str, type[BaseClue]] = {}
+        self._extractors: dict[type[BaseClue], ClueExtractor] = {}
+        self._type_by_name: dict[str, type[BaseClue]] = {}
 
     def register(self, extractor: ClueExtractor) -> None:
         clue_cls = extractor.clue_type

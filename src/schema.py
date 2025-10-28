@@ -37,9 +37,11 @@ class ValidationResult(BaseModel):
 
 class BaseClue(BaseModel):
     id: str
-    scene: int
+    segment: int
     clue_type: str
     evidence: str
+    references: list[str] = Field(default_factory=list)
+    referenced_segments: list[int] = Field(default_factory=list)
 
     @field_validator("evidence")
     @classmethod
@@ -82,7 +84,7 @@ class FinalRelation(BaseModel):
 
 
 class TurningEntry(BaseModel):
-    scene: int
+    segment: int
     category: TurningCategory
     pattern: str
     summary: str
@@ -101,7 +103,7 @@ class DyadFinal(BaseModel):
 
 
 class LLMEventRole(BaseModel):
-    scene: int
+    segment: int
     id: str
     event_role: Literal["turning", "supporting"]
 

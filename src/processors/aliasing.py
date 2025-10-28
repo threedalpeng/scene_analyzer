@@ -75,7 +75,7 @@ class AliasResolver(Processor):
         for clue in result.get(EntityClue):
             canonical = clue.name
             groups[canonical].add(canonical)
-            groups[canonical].update(clue.aliases_in_scene)
+            groups[canonical].update(clue.aliases_in_segment)
         return AliasGroups(
             groups=[
                 AliasGroup(canonical=name, aliases=sorted(list(aliases)))
@@ -93,7 +93,7 @@ class AliasResolver(Processor):
         for clue in entities:
             canonical = clue.name
             groups[canonical].add(canonical)
-            groups[canonical].update(clue.aliases_in_scene)
+            groups[canonical].update(clue.aliases_in_segment)
 
         return AliasGroups(
             groups=[
@@ -112,8 +112,8 @@ class AliasResolver(Processor):
         for clue in [*result.get(ActClue), *result.get(ToMClue)]:
             pair = clue.pair
             unique_names.update(pair)
-            appearances[pair[0]].add(clue.scene)
-            appearances[pair[1]].add(clue.scene)
+            appearances[pair[0]].add(clue.segment)
+            appearances[pair[1]].add(clue.segment)
 
         return sorted(unique_names), {k: sorted(v) for k, v in appearances.items()}
 

@@ -14,7 +14,7 @@ from processors.temporal import TemporalReconstructor
 from utils import ensure_dir, log_status, make_client
 
 
-def _load_scenes(path: Path) -> list[dict]:
+def _load_segments(path: Path) -> list[dict]:
     with path.open("r", encoding="utf-8") as f:
         return [json.loads(line) for line in f if line.strip()]
 
@@ -28,7 +28,7 @@ def _load_metadata(path: Path | None) -> dict[int, dict]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run narrative analysis pipeline")
-    parser.add_argument("scenes", type=Path, help="Path to scenes JSONL input")
+    parser.add_argument("segments", type=Path, help="Path to segments JSONL input")
     parser.add_argument("out", type=Path, help="Output directory")
     parser.add_argument(
         "--metadata", type=Path, default=None, help="Optional fabula metadata JSON"
@@ -51,11 +51,11 @@ def main() -> None:
         .process(ResultSaver(args.out))
     )
 
-    scenes = _load_scenes(args.scenes)
+    segments = _load_segments(args.segments)
     metadata = _load_metadata(args.metadata)
 
     log_status("Starting pipeline run")
-    pipeline.run(scenes, metadata=metadata)
+    pipeline.run(segments, metadata=metadata)
 
     log_status("Pipeline completed")
 

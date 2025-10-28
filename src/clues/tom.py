@@ -67,7 +67,7 @@ class ToMExtractor(BatchExtractor):
         }
 
     def _parse_response(
-        self, raw_payload: Any, scene_id: int
+        self, raw_payload: Any, segment_id: int
     ) -> tuple[list[str], list["ToMClue"]]:
         schema_model = self._build_response_schema()
         payload_model = parse_model(schema_model, raw_payload)
@@ -106,7 +106,7 @@ class ToMClue(PairClue):
 
 class ToMClueAPI(EvidenceClippingMixin):
     id: str | None = None
-    scene: int
+    segment: int
     pair: list[str] = Field(min_length=2, max_length=2)
     clue_type: Literal["tom"] = "tom"
     evidence: str

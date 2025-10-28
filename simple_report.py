@@ -2,7 +2,7 @@
 # Usage:
 #   export GOOGLE_API_KEY="YOUR_KEY"
 #   pip install google-genai
-#   python analyze_cooperation_simple.py scenes.json --out report.md
+#   python analyze_cooperation_simple.py segments.json --out report.md
 
 import argparse
 import json
@@ -11,7 +11,7 @@ from typing import List, Dict
 from google import genai
 from google.genai import types
 
-SYSTEM = """You are a careful narrative analyst. Your only sources of truth are the scene texts provided to you. 
+SYSTEM = """You are a careful narrative analyst. Your only sources of truth are the segment texts provided to you. 
 Your tasks:
 - Identify ONLY cooperative or de-escalating interactions that are *explicitly evidenced* in the text.
 - Distinguish voluntary cooperation from coerced compliance.
@@ -27,14 +27,14 @@ Constraints:
 - Be concise and structured. Return strictly in the requested Markdown format.
 """
 
-SCENE_PROMPT = """Scene ID: {scene_id}
+SEGMENT_PROMPT = """Segment ID: {segment_id}
 
 Text with line numbers:
 {numbered_text}
 
 Produce Markdown in the exact format:
 
-## Scene {scene_id}
+## Segment {segment_id}
 Cooperative Acts:
 - Actor → Target — {{Label from [Info-Share|Coord-Action|Protect-Rescue|De-escalate|Comfort|Resource-Share|Apology|Negotiation|Compliance|Coercion]}} ({{Voluntary|Coerced}}; Outcome={{Success|Partial|Fail}}) — "short evidence quote" (Lx–Ly)
 - (add more bullets as needed; omit if none)
@@ -48,11 +48,11 @@ Summary (2–3 sentences):
 
 """
 
-FINAL_PROMPT = """You will write a concise overall report about cooperation across scenes.
+FINAL_PROMPT = """You will write a concise overall report about cooperation across segments.
 
-Inputs (per-scene digests in fixed format):
+Inputs (per-segment digests in fixed format):
 ---
-{scene_digests}
+{segment_digests}
 ---
 
 Write a single Markdown report with the following sections:
@@ -65,14 +65,14 @@ Write a single Markdown report with the following sections:
 - Base claims ONLY on the digests.
 
 ## Key Cooperative Pairs
-- 3–6 bullets. Each bullet: Pair — why they matter — cite at least one scene like [Scene 12].
+- 3–6 bullets. Each bullet: Pair — why they matter — cite at least one segment like [Segment 12].
 
 ## Notable Events
-- 5–10 bullets. Each: [Scene N] — one-line description of the cooperative event and its effect on the situation.
+- 5–10 bullets. Each: [Segment N] — one-line description of the cooperative event and its effect on the situation.
 
 ## Relationship Shifts
 - Summarize clear trust/solidarity shifts recorded in the digests.
-- Mention direction (strengthening vs weakening) and cite scenes like [Scene N].
+- Mention direction (strengthening vs weakening) and cite segments like [Segment N].
 - If shifts are scarce or ambiguous, say so.
 
 ## Current State
@@ -81,7 +81,7 @@ Write a single Markdown report with the following sections:
 
 Formatting rules:
 - Use ONLY information from the digests.
-- Reference scenes with square brackets: [Scene N].
+- Reference segments with square brackets: [Segment N].
 - Be precise and economical with words; avoid repetition.
 
 """
@@ -99,9 +99,9 @@ def add_line_numbers(text: str) -> str:
     return "\n".join(out)
 
 
-def summarize_scene(client: genai.Client, model: str, scene_id: int, text: str) -> str:
+def summarize_segment(client: genai.Client, model: str, segment_id: int, text: str) -> str:
     numbered = add_line_numbers(text)
-    prompt = SCENE_PROMPT.format(scene_id=scene_id, numbered_text=numbered)
+    prompt = SEGMENT_PROMPT.format(segment_id=segment_id, numbered_text=numbered)
     resp = client.models.generate_content(
         model=model,
         contents=prompt,
@@ -124,14 +124,14 @@ def summarize_scene(client: genai.Client, model: str, scene_id: int, text: str) 
                 t = getattr(p, "text", None)
                 if isinstance(t, str) and t.strip():
                     return f"{t.strip()}"
-    raise RuntimeError(f"No text returned for scene {scene_id}")
+    raise RuntimeError(f"No text returned for segment {segment_id}")
 
 
 def build_final_report(
-    client: genai.Client, model: str, scene_digests: List[str]
+    client: genai.Client, model: str, segment_digests: List[str]
 ) -> str:
-    joined = "\n\n".join(scene_digests)
-    prompt = FINAL_PROMPT.format(scene_digests=joined)
+    joined = "\n\n".join(segment_digests)
+    prompt = FINAL_PROMPT.format(segment_digests=joined)
     resp = client.models.generate_content(
         model=model,
         contents=prompt,
@@ -157,10 +157,10 @@ def build_final_report(
 
 def main():
     ap = argparse.ArgumentParser(
-        description="LLM-only simple cooperation analyzer per scene."
+        description="LLM-only simple cooperation analyzer per segment."
     )
     ap.add_argument(
-        "scenes_path", help="scenes.json (list of {scene_id,int, text,str})"
+        "segments_path", help="segments.json (list of {segment_id,int, text,str})"
     )
     ap.add_argument("--out", default="report.md", help="Output Markdown file")
     ap.add_argument(
@@ -174,28 +174,28 @@ def main():
     if not api_key:
         raise SystemExit("Set GOOGLE_API_KEY env var.")
 
-    with open(args.scenes_path, "r", encoding="utf-8") as f:
-        scenes = json.load(f)
-    if not isinstance(scenes, list):
-        raise SystemExit("Input must be a list of {scene_id, text} objects.")
+    with open(args.segments_path, "r", encoding="utf-8") as f:
+        segments = json.load(f)
+    if not isinstance(segments, list):
+        raise SystemExit("Input must be a list of {segment_id, text} objects.")
 
     client = genai.Client(api_key=api_key)
 
     digests: List[str] = []
-    for obj in scenes:
-        sid = obj.get("scene_id") or obj.get("scene") or obj.get("id")
+    for obj in segments:
+        sid = obj.get("segment_id") or obj.get("segment") or obj.get("id")
         text = obj.get("text") or obj.get("content") or ""
         if not sid or not text:
             # skip malformed entries
             continue
-        print(f"Scene: {sid} summarizing...")
-        digest = summarize_scene(client, args.model, int(sid), text)
+        print(f"Segment: {sid} summarizing...")
+        digest = summarize_segment(client, args.model, int(sid), text)
         digests.append(digest)
 
     final_report = build_final_report(client, args.model, digests)
 
     with open(args.out, "w", encoding="utf-8") as wf:
-        wf.write("# Scene-by-Scene Cooperation Digests\n\n")
+        wf.write("# Segment-by-Segment Cooperation Digests\n\n")
         wf.write("\n\n".join(digests))
         wf.write("\n\n---\n\n")
         wf.write(final_report)

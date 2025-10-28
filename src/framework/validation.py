@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Iterable, Mapping, Sequence
 
 from framework.base import ClueExtractor, NullValidator
@@ -12,7 +12,8 @@ from schema import BaseClue, ValidationResult
 class ValidationContext:
     """Context for coherence validation."""
 
-    known_scenes: set[int]
+    known_segments: set[int]
+    known_clue_ids: set[str] = field(default_factory=set)
 
 
 class ValidationPipeline:
@@ -53,7 +54,8 @@ class ValidationPipeline:
 
         if context is not None:
             context_payload: Mapping[str, object] = {
-                "known_scenes": context.known_scenes,
+                "known_segments": context.known_segments,
+                "known_clue_ids": context.known_clue_ids,
             }
         else:
             context_payload = {}
@@ -83,8 +85,8 @@ class ValidationPipeline:
             errors.append("id is required")
         if not clue.clue_type:
             errors.append("clue_type is required")
-        if clue.scene is None or int(clue.scene) < 0:
-            errors.append("scene must be non-negative")
+        if clue.segment is None or int(clue.segment) < 0:
+            errors.append("segment must be non-negative")
         if not clue.evidence:
             errors.append("evidence is required")
         if not clue.id.startswith(f"{clue.clue_type}_"):
@@ -100,31 +102,26 @@ class ValidationPipeline:
     ) -> ValidationResult | None:
         warnings: list[str] = []
 
-        if clue.clue_type == "act":
-            axes = getattr(clue, "axes", None)
-            consequence_refs = getattr(axes, "consequence_refs", []) if axes else []
-            known = context.get("known_scenes", set())
-            missing = [ref for ref in consequence_refs if ref not in known]
-            if missing:
+        refs = getattr(clue, "references", []) or []
+        if refs:
+            known_ids = context.get("known_clue_ids", set())
+            missing_ids = [ref for ref in refs if ref not in known_ids]
+            if missing_ids:
                 warnings.append(
-                    "act clue consequence_refs reference unknown scenes: "
-                    + ", ".join(str(m) for m in missing)
+                    "references unknown clue ids: " + ", ".join(missing_ids)
                 )
 
-        if clue.clue_type == "temporal":
-            references = getattr(clue, "references_scenes", [])
-            known = context.get("known_scenes", set())
-            missing = [ref for ref in references if ref not in known]
-            if missing:
+        referenced_segments = getattr(clue, "referenced_segments", []) or []
+        if referenced_segments:
+            known_segments = context.get("known_segments", set())
+            missing_segments = [
+                ref for ref in referenced_segments if ref not in known_segments
+            ]
+            if missing_segments:
                 warnings.append(
-                    "temporal clue references unknown scene ids: "
-                    + ", ".join(str(m) for m in missing)
+                    "referenced_segments unknown: "
+                    + ", ".join(str(m) for m in missing_segments)
                 )
-
-        if clue.clue_type == "entity":
-            aliases = getattr(clue, "aliases_in_scene", [])
-            if not aliases:
-                warnings.append("entity clue should list aliases if present")
 
         if warnings:
             return ValidationResult.ok(level="coherence", warnings=warnings)

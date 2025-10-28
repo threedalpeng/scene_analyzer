@@ -57,12 +57,12 @@ def explode_directed(acts: Sequence["ActClue"]) -> list["ActClue"]:
     return out
 
 
-def bundle_same_scene(acts: Sequence["ActClue"]) -> list["ActClue"]:
+def bundle_same_segment(acts: Sequence["ActClue"]) -> list["ActClue"]:
     buckets: dict[tuple[int, str, str, str, str], list[ActClue]] = defaultdict(list)
     for act in acts:
         src = act.actors[0] if act.actors else act.pair[0]
         dst = act.targets[0] if act.targets else act.pair[1]
-        buckets[(act.scene, src, dst, act.valence, act.pattern)].append(act)
+        buckets[(act.segment, src, dst, act.valence, act.pattern)].append(act)
 
     representatives: list[ActClue] = []
     for items in buckets.values():
@@ -75,26 +75,14 @@ def bundle_same_scene(acts: Sequence["ActClue"]) -> list["ActClue"]:
 class ActValidator(ClueValidator):
     def validate_semantic(self, clue: "ActClue") -> ValidationResult:
         warnings: list[str] = []
-        if clue.axes.stakes == "major" and not clue.axes.consequence_refs:
-            warnings.append("major stakes usually reference downstream scenes")
+        if clue.axes.stakes == "major" and not clue.referenced_segments:
+            warnings.append("major stakes usually reference downstream segments")
         return ValidationResult.ok(level="semantic", warnings=warnings)
 
     def validate_coherence(
         self, clue: "ActClue", context: Mapping[str, object] | None = None
     ) -> ValidationResult | None:
-        if context is None:
-            return None
-        known = context.get("known_scenes", set())
-        known_set = set(known) if isinstance(known, (set, list, tuple)) else set()
-        missing = [ref for ref in clue.axes.consequence_refs if ref not in known_set]
-        if missing:
-            return ValidationResult.ok(
-                level="coherence",
-                warnings=[
-                    "act clue consequence_refs reference unknown scenes: "
-                    + ", ".join(str(m) for m in missing)
-                ],
-            )
+        _ = clue, context
         return None
 
 
@@ -122,7 +110,7 @@ class ActExtractor(BatchExtractor):
             "concepts": [
                 (
                     "Action",
-                    "Explicit behavior described in the scene where an actor affects a target.",
+                    "Explicit behavior described in the segment where an actor affects a target.",
                 ),
                 (
                     "Valence",
@@ -134,21 +122,25 @@ class ActExtractor(BatchExtractor):
                 ),
                 (
                     "Axes",
-                    "Ratings for salience, stakes, durability, volition, goal_alignment, and consequence_refs.",
+                    "Ratings for salience, stakes, durability, volition, and goal_alignment.",
+                ),
+                (
+                    "Referenced_segments",
+                    "Downstream segment ids where this action's consequences appear.",
                 ),
             ],
             "special_rules": [
                 "Direction is critical: every action must clearly identify actor → target.",
                 "If multiple actors or targets exist, create separate action entries for each combination.",
                 "Mark durability as 'persistent' for irreversible outcomes (pledge, affiliation change, death, etc.).",
-                "List consequence_refs only when the downstream impact is explicitly stated or strongly implied.",
+                "List referenced_segments only when the downstream impact is explicitly stated or strongly implied.",
                 "Omit the clue if you cannot confidently identify both actor and target from explicit text.",
             ],
             "schema_model": ActClueAPI,
         }
 
     def _parse_response(
-        self, raw_payload: Any, scene_id: int
+        self, raw_payload: Any, segment_id: int
     ) -> tuple[list[str], list["ActClue"]]:
         schema_model = self._build_response_schema()
         payload_model = parse_model(schema_model, raw_payload)
@@ -184,7 +176,6 @@ class Axes(BaseModel):
     durability: Durability
     volition: Volition
     goal_alignment: GoalAlignment
-    consequence_refs: list[int] = Field(default_factory=list)
 
 
 class ActClue(PairClue):
@@ -198,7 +189,7 @@ class ActClue(PairClue):
 
 class ActClueAPI(EvidenceClippingMixin):
     id: str | None = None
-    scene: int
+    segment: int
     pair: list[str] = Field(min_length=2, max_length=2)
     clue_type: Literal["act"] = "act"
     evidence: str
@@ -207,6 +198,7 @@ class ActClueAPI(EvidenceClippingMixin):
     valence: ValenceCore
     pattern: str
     axes: Axes
+    referenced_segments: list[int] = Field(default_factory=list)
 
     def to_internal(self) -> ActClue:
         data = self.model_dump()
@@ -224,5 +216,5 @@ __all__ = [
     "ValenceCore",
     "act_score",
     "explode_directed",
-    "bundle_same_scene",
+    "bundle_same_segment",
 ]

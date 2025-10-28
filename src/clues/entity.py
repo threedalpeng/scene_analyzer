@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
 class EntityValidator(ClueValidator):
     def validate_semantic(self, clue: "EntityClue") -> ValidationResult:
-        if not clue.aliases_in_scene:
+        if not clue.aliases_in_segment:
             return ValidationResult.fail(
                 level="semantic", errors=["alias list must not be empty"]
             )
@@ -24,7 +24,7 @@ class EntityValidator(ClueValidator):
     def validate_coherence(
         self, clue: "EntityClue", context: Mapping[str, object] | None = None
     ) -> ValidationResult | None:
-        if clue.aliases_in_scene:
+        if clue.aliases_in_segment:
             return None
         return ValidationResult.ok(
             level="coherence",
@@ -54,23 +54,23 @@ class EntityExtractor(BatchExtractor):
         return {
             "clue_type": "entity",
             "display_name": "ENTITY ALIAS CLUES",
-            "purpose": "Resolve explicit alias relationships for characters mentioned in the scene.",
+            "purpose": "Resolve explicit alias relationships for characters mentioned in the segment.",
             "concepts": [
-                ("Name", "Primary name used for the character in this scene."),
+                ("Name", "Primary name used for the character in this segment."),
                 (
-                    "Aliases_in_scene",
-                    "Other names or titles explicitly referring to the same person within this scene.",
+                    "Aliases_in_segment",
+                    "Other names or titles explicitly referring to the same person within this segment.",
                 ),
             ],
             "special_rules": [
-                "Only capture aliases when both names appear in the scene and refer to the same person.",
+                "Only capture aliases when both names appear in the segment and refer to the same person.",
                 "Evidence must quote the text that links the alias to the canonical name.",
             ],
             "schema_model": EntityClueAPI,
         }
 
     def _parse_response(
-        self, raw_payload: Any, scene_id: int
+        self, raw_payload: Any, segment_id: int
     ) -> tuple[list[str], list["EntityClue"]]:
         schema_model = self._build_response_schema()
         payload_model = parse_model(schema_model, raw_payload)
@@ -101,16 +101,16 @@ class EntityExtractor(BatchExtractor):
 class EntityClue(BaseClue):
     clue_type: Literal["entity"] = "entity"
     name: str
-    aliases_in_scene: list[str] = Field(default_factory=list)
+    aliases_in_segment: list[str] = Field(default_factory=list)
 
 
 class EntityClueAPI(EvidenceClippingMixin):
     id: str | None = None
-    scene: int
+    segment: int
     clue_type: Literal["entity"] = "entity"
     evidence: str
     name: str
-    aliases_in_scene: list[str] = Field(default_factory=list)
+    aliases_in_segment: list[str] = Field(default_factory=list)
 
     def to_internal(self) -> EntityClue:
         data = self.model_dump()

@@ -9,7 +9,7 @@ from google import genai
 from google.genai import types
 from pydantic import BaseModel
 
-from clues.act import ActClue, act_score, bundle_same_scene, explode_directed
+from clues.act import ActClue, act_score, bundle_same_segment, explode_directed
 from clues.tom import ToMClue
 from framework.processor import Processor
 from framework.result import PipelineResult
@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 
 DYAD_SYSTEM_PROMPT = """
-You adjudicate relationship state across scenes for a dyad (character pair).
+You adjudicate relationship state across segments for a dyad (character pair).
 Use ONLY the provided clue packs and return strict JSON per schema.
 
 {body}
@@ -35,9 +35,9 @@ Pattern: Free-form label describing the domain-specific pattern (e.g., "betrayal
 
 Turning Detection Logic:
   1. Identify candidate when there is a category change meeting the threshold.
-  2. Threshold: stakes="major" OR (salience="high" AND durability="persistent") OR consequence_refs present.
+  2. Threshold: stakes="major" OR (salience="high" AND durability="persistent") OR referenced_segments present.
   3. Verify representative act exists.
-  4. Check for implicit turns: IntendsTo/DesiresFor followed within ≤2 scenes by consistent action.
+  4. Check for implicit turns: IntendsTo/DesiresFor followed within ≤2 segments by consistent action.
 
 Pre/Post State:
   - pre_state: valence/durability before the turn.
@@ -110,9 +110,9 @@ def build_bags(
         ensure(tom.pair).toms.append(tom)
 
     for bag in bags.values():
-        bag.acts_rep.sort(key=lambda x: x.scene)
-        bag.acts_all.sort(key=lambda x: x.scene)
-        bag.toms.sort(key=lambda x: x.scene)
+        bag.acts_rep.sort(key=lambda x: x.segment)
+        bag.acts_all.sort(key=lambda x: x.segment)
+        bag.toms.sort(key=lambda x: x.segment)
 
     return bags
 
@@ -135,9 +135,13 @@ def _packs_for_pair(bag: DyadBag) -> tuple[list[str], list[str], dict, dict]:
 
     causal_edges = []
     for act in bag.acts_all:
-        for ref in act.axes.consequence_refs:
+        for ref in act.referenced_segments:
             causal_edges.append(
-                {"src_scene": act.scene, "dst_scene": int(ref), "via": [act.id]}
+                {
+                    "src_segment": act.segment,
+                    "dst_segment": int(ref),
+                    "via": [act.id],
+                }
             )
     causal_json = {"edges": causal_edges[:50]}
 
@@ -192,7 +196,7 @@ class DyadSynthesizer(Processor):
     def __call__(self, result: PipelineResult) -> SynthesisResult:
         acts = result.get(ActClue)
         toms = result.get(ToMClue)
-        acts_representative = bundle_same_scene(acts)
+        acts_representative = bundle_same_segment(acts)
         acts_directed = explode_directed(acts)
         bags = build_bags(toms, acts_representative, acts_directed)
         adjudication = self._run_batch(bags.items())

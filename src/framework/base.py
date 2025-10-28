@@ -54,15 +54,15 @@ class ClueExtractor(Generic[ClueT], ABC):
         """Concrete BaseClue subtype produced by this extractor."""
 
     @abstractmethod
-    def extract(self, scene_text: str, scene_id: int) -> Sequence[ClueT]:
-        """Extract clues from a single scene."""
+    def extract(self, segment_text: str, segment_id: int) -> Sequence[ClueT]:
+        """Extract clues from a single segment."""
 
     def batch_extract(self, items: Iterable[tuple[int, str]]) -> Sequence[ClueT]:
         """Optional batch extraction hook; defaults to sequential extract calls."""
 
         outputs: list[ClueT] = []
-        for scene_id, text in items:
-            outputs.extend(self.extract(text, scene_id))
+        for segment_id, text in items:
+            outputs.extend(self.extract(text, segment_id))
         return outputs
 
     def score(self, clue: ClueT) -> float:
@@ -77,7 +77,7 @@ class ClueExtractor(Generic[ClueT], ABC):
         return NullValidator()
 
     def participants(self) -> Mapping[int, list[str]]:
-        """Return participants by scene; defaults to empty dict."""
+        """Return participants by segment; defaults to empty dict."""
         return {}
 
     def registry_members(self) -> Sequence["ClueExtractor[Any]"]:

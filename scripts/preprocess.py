@@ -28,11 +28,11 @@ def normalize_text(s: Optional[str]) -> str:
     return s
 
 
-def parse_scene_etree(scene_elem: ET.Element) -> str:
+def parse_segment_etree(segment_elem: ET.Element) -> str:
     lines: List[str] = []
     current_char: Optional[str] = None
     # Iterate in order to preserve character-dialogue sequence
-    for child in list(scene_elem):
+    for child in list(segment_elem):
         tag = child.tag.lower()
         txt = (child.text or "").strip()
         if not txt:
@@ -40,7 +40,7 @@ def parse_scene_etree(scene_elem: ET.Element) -> str:
         if tag == "stage_direction":
             lines.append(txt)
             current_char = None
-        elif tag == "scene_description":
+        elif tag == "segment_description":
             lines.append(txt)
         elif tag == "character":
             current_char = txt
@@ -56,7 +56,7 @@ def parse_scene_etree(scene_elem: ET.Element) -> str:
 
 
 def parse_script(script_text: str) -> List[str]:
-    """Return list of scene texts in order."""
+    """Return list of segment texts in order."""
     if not script_text:
         return []
     s = script_text.strip()
@@ -65,28 +65,28 @@ def parse_script(script_text: str) -> List[str]:
         s = "<script>\n" + s + "\n</script>"
     try:
         root = ET.fromstring(s)
-        scenes = []
-        for sc in root.findall(".//scene"):
-            scenes.append(parse_scene_etree(sc))
-        if scenes:
-            return scenes
+        segments = []
+        for sc in root.findall(".//segment"):
+            segments.append(parse_segment_etree(sc))
+        if segments:
+            return segments
     except ET.ParseError:
         pass
 
-    # Fallback: regex-based extraction of scenes
-    scenes = []
-    for m in re.finditer(r"<scene>(.*?)</scene>", s, re.I | re.S):
+    # Fallback: regex-based extraction of segments
+    segments = []
+    for m in re.finditer(r"<segment>(.*?)</segment>", s, re.I | re.S):
         block = m.group(1)
         # Collect stage_direction & description
         parts: List[str] = []
-        for tag in ["stage_direction", "scene_description"]:
+        for tag in ["stage_direction", "segment_description"]:
             mm = re.search(rf"<{tag}>(.*?)</{tag}>", block, re.I | re.S)
             if mm and mm.group(1).strip():
                 parts.append(re.sub(r"\s+", " ", mm.group(1).strip()))
         # Character / dialogue in order (simplified: sequential scan)
         # We'll scan tags in order and pair character+dialogue when encountered
         tokens = re.findall(
-            r"<(stage_direction|scene_description|character|dialogue)>(.*?)</\1>",
+            r"<(stage_direction|segment_description|character|dialogue)>(.*?)</\1>",
             block,
             re.I | re.S,
         )
@@ -101,19 +101,19 @@ def parse_script(script_text: str) -> List[str]:
                     parts.append(f"{current_char}: {val}")
                 else:
                     parts.append(val)
-            # stage_direction/scene_description are already added at top, skip duplicates
+            # stage_direction/segment_description are already added at top, skip duplicates
         text = "\n".join(p for p in parts if p)
-        scenes.append(text.strip())
-    return scenes
+        segments.append(text.strip())
+    return segments
 
 
-def write_jsonl(movie_name: str, scenes: List[str], out_dir: Path) -> Path:
+def write_jsonl(movie_name: str, segments: List[str], out_dir: Path) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     fname = safe_filename(movie_name) + ".jsonl"
     out_path = out_dir / fname
     with open(out_path, "w", encoding="utf-8") as f:
-        for i, sc in enumerate(scenes, 1):
-            obj = {"scene": i, "text": sc}
+        for i, sc in enumerate(segments, 1):
+            obj = {"segment": i, "text": sc}
             f.write(json.dumps(obj, ensure_ascii=False) + "\n")
     return out_path
 
@@ -132,15 +132,15 @@ def process_dataset(
         for row in ds:
             movie_name = row.get("movie_name") or row.get("imdb_id") or "UNKNOWN_MOVIE"
             script = row.get("script") or ""
-            scenes = parse_script(script)
-            write_jsonl(movie_name, scenes, Path(out_dir))
+            segments = parse_script(script)
+            write_jsonl(movie_name, segments, Path(out_dir))
             total_movies += 1
     return total_movies
 
 
 def main():
     ap = argparse.ArgumentParser(
-        description="Split MovieSum scripts into scene-level JSONL files."
+        description="Split MovieSum scripts into segment-level JSONL files."
     )
     ap.add_argument("--dataset", default="rohitsaxena/MovieSum", help="HF dataset path")
     ap.add_argument("--out_dir", default="./movies", help="Output directory")
