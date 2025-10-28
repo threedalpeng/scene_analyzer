@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Iterable, Mapping, Sequence
 
-from framework.base import ClueExtractor, ClueValidator
+from framework.base import ClueExtractor, NullValidator
 from framework.registry import ClueRegistry
 from schema import BaseClue, ValidationResult
 
@@ -131,15 +131,8 @@ class ValidationPipeline:
         return None
 
 
-class NullValidator(ClueValidator):
-    """Default validator that always passes semantic/ coherence checks."""
-
-    def validate_semantic(self, clue: BaseClue) -> ValidationResult:  # noqa: D401
-        _ = clue
-        return ValidationResult.ok(level="semantic")
-
-    def validate_coherence(
-        self, clue: BaseClue, context: Mapping[str, Any] | None = None
-    ) -> ValidationResult | None:  # noqa: D401
-        _ = clue, context
-        return None
+__all__ = [
+    "ValidationContext",
+    "ValidationPipeline",
+    "NullValidator",
+]

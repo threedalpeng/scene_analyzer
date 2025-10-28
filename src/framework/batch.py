@@ -2,17 +2,19 @@ import time
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, MutableMapping, Sequence
-from typing import Any, Type
+from typing import TYPE_CHECKING, Any, Type
 
 from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field, ValidationError, create_model
 
 from framework.base import ClueExtractor, ClueT
-from framework.pipeline import PipelineConfig
 from framework.prompts import build_system_prompt
 from schema import BaseClue
 from utils import log_status, parse_model
+
+if TYPE_CHECKING:
+    from framework.pipeline import PipelineConfig
 
 
 class BatchExtractor(ClueExtractor[ClueT], ABC):

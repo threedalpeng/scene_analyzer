@@ -11,8 +11,6 @@ from typing import (
     Type,
     TypeVar,
 )
-
-from framework.validation import NullValidator
 from schema import BaseClue, ValidationResult
 
 if TYPE_CHECKING:
@@ -91,7 +89,22 @@ class ClueExtractor(Generic[ClueT], ABC):
         return f"{cls.__module__}.{cls.__qualname__}"
 
 
+class NullValidator(ClueValidator):
+    """Default validator that always passes semantic/coherence checks."""
+
+    def validate_semantic(self, clue: BaseClue) -> ValidationResult:  # noqa: D401
+        _ = clue
+        return ValidationResult.ok(level="semantic")
+
+    def validate_coherence(
+        self, clue: BaseClue, context: Mapping[str, Any] | None = None
+    ) -> ValidationResult | None:  # noqa: D401
+        _ = clue, context
+        return None
+
+
 __all__ = [
     "ClueExtractor",
     "ClueValidator",
+    "NullValidator",
 ]

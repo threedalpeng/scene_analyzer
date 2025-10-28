@@ -51,7 +51,7 @@ class BaseClue(BaseModel):
 class EvidenceClippingMixin(BaseModel):
     """Mixin that enforces evidence clipping and trimming."""
 
-    @field_validator("evidence")
+    @field_validator("evidence", check_fields=False)
     @classmethod
     def _clip_api_evidence(cls, value: str) -> str:
         value = value.strip()

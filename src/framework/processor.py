@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Protocol, Type
+from typing import TYPE_CHECKING, Protocol, Type
 
 from pydantic import BaseModel
 
-from framework.pipeline import PipelineConfig
 from framework.result import PipelineResult
+
+if TYPE_CHECKING:
+    from framework.pipeline import PipelineConfig
 
 
 class Processor(Protocol):
