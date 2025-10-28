@@ -3,16 +3,16 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Iterable, Tuple, Type
+from typing import TYPE_CHECKING, Iterable, Type
 
 from google import genai
 from google.genai import types
+from pydantic import BaseModel
 
 from clues.act import ActClue, act_score, bundle_same_scene, explode_directed
 from clues.tom import ToMClue
 from framework.processor import Processor
 from framework.result import PipelineResult
-from pydantic import BaseModel
 from schema import LLMAdjudication
 from utils import log_status, parse_model
 
@@ -84,6 +84,7 @@ class DyadAnalysis(BaseModel):
     char1: str
     char2: str
     adjudication: LLMAdjudication
+
 
 class SynthesisResult(BaseModel):
     acts_representative: list[ActClue]
@@ -199,7 +200,9 @@ class DyadSynthesizer(Processor):
         for pair, payload in adjudication.items():
             sorted_pair = tuple(sorted(pair))
             dyads.append(
-                DyadAnalysis(char1=sorted_pair[0], char2=sorted_pair[1], adjudication=payload)
+                DyadAnalysis(
+                    char1=sorted_pair[0], char2=sorted_pair[1], adjudication=payload
+                )
             )
         return SynthesisResult(
             acts_representative=acts_representative,

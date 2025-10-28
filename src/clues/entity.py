@@ -80,7 +80,9 @@ class EntityExtractor(BatchExtractor):
         clues: list[EntityClue] = []
         for item in entity_items:
             clue_api = (
-                item if isinstance(item, EntityClueAPI) else EntityClueAPI.model_validate(item)
+                item
+                if isinstance(item, EntityClueAPI)
+                else EntityClueAPI.model_validate(item)
             )
             clues.append(clue_api.to_internal())
         return participants, clues

@@ -51,7 +51,10 @@ class ToMExtractor(BatchExtractor):
             "purpose": "Mental states that one character holds ABOUT another character.",
             "concepts": [
                 ("BelievesAbout", "What character A believes regarding character B."),
-                ("FeelsTowards", "Emotional stance character A has towards character B."),
+                (
+                    "FeelsTowards",
+                    "Emotional stance character A has towards character B.",
+                ),
                 ("IntendsTo", "What character A plans to do regarding character B."),
                 ("DesiresFor", "What character A wants from or for character B."),
             ],
@@ -73,7 +76,11 @@ class ToMExtractor(BatchExtractor):
 
         clues: list[ToMClue] = []
         for item in tom_items:
-            clue_api = item if isinstance(item, ToMClueAPI) else ToMClueAPI.model_validate(item)
+            clue_api = (
+                item
+                if isinstance(item, ToMClueAPI)
+                else ToMClueAPI.model_validate(item)
+            )
             clues.append(clue_api.to_internal())
         return participants, clues
 

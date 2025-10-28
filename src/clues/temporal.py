@@ -70,7 +70,10 @@ class TemporalExtractor(BatchExtractor):
                     "Time_offset",
                     "Approximate time delta from the narrative present (days, negative for past).",
                 ),
-                ("Is_flashback", "True when the scene is presented out of chronological order."),
+                (
+                    "Is_flashback",
+                    "True when the scene is presented out of chronological order.",
+                ),
             ],
             "special_rules": [
                 "Use only explicit temporal markers (timestamps, dialogue references, SDH cues).",

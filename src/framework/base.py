@@ -11,6 +11,7 @@ from typing import (
     Type,
     TypeVar,
 )
+
 from schema import BaseClue, ValidationResult
 
 if TYPE_CHECKING:

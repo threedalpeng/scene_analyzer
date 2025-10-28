@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from typing import Dict, Iterable, Iterator, Type
 
-from pydantic import BaseModel
-
 from framework.base import ClueExtractor
 from schema import BaseClue
 
@@ -53,25 +51,3 @@ class ClueRegistry:
 
     def __len__(self) -> int:
         return len(self._extractors)
-
-
-class ProcessorResultRegistry:
-    """Registry for processor result types, keyed by class name."""
-
-    def __init__(self) -> None:
-        self._types: Dict[str, Type[BaseModel]] = {}
-
-    def register(self, result_type: Type[BaseModel]) -> None:
-        name = result_type.__name__
-        if name in self._types:
-            raise ValueError(f"Result type '{name}' already registered")
-        self._types[name] = result_type
-
-    def get_type(self, name: str) -> Type[BaseModel]:
-        try:
-            return self._types[name]
-        except KeyError as err:
-            raise KeyError(f"Unknown result type: {name}") from err
-
-    def has_type(self, name: str) -> bool:
-        return name in self._types

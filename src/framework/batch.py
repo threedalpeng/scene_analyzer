@@ -134,7 +134,7 @@ class BatchExtractor(ClueExtractor[ClueT], ABC):
 
             successful_ids: list[int] = []
             for idx, resp in enumerate(bj.dest.inlined_responses, start=1):
-                scene_id = int(sub[idx - 1]["scene"])
+                _scene_id = int(sub[idx - 1]["scene"])
                 result = self._process_single_response(
                     resp, sub[idx - 1], batch_idx, total, idx
                 )

@@ -44,7 +44,7 @@ def main() -> None:
     config = PipelineConfig(client=client, batch_size=args.batch)
     pipeline = (
         Pipeline(config)
-        .extract([ActExtractor, ToMExtractor, TemporalExtractor, EntityExtractor])
+        .extract([ActExtractor, ToMExtractor, TemporalExtractor])
         .process(AliasResolver())
         .process(TemporalReconstructor())
         .process(DyadSynthesizer())

@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any, Literal, Mapping, Sequence, Type
 
-from pydantic import BaseModel, Field, computed_field
+from pydantic import BaseModel, Field
 
 from framework.base import ClueValidator
 from framework.batch import BatchExtractor
@@ -120,7 +120,10 @@ class ActExtractor(BatchExtractor):
             "display_name": "ACT CLUES",
             "purpose": "Observable actions where one character (actor) affects another character (target).",
             "concepts": [
-                ("Action", "Explicit behavior described in the scene where an actor affects a target."),
+                (
+                    "Action",
+                    "Explicit behavior described in the scene where an actor affects a target.",
+                ),
                 (
                     "Valence",
                     "positive (helps, cooperates, supports) or negative (harms, opposes, threatens).",
@@ -154,7 +157,11 @@ class ActExtractor(BatchExtractor):
 
         clues: list[ActClue] = []
         for item in act_items:
-            clue_api = item if isinstance(item, ActClueAPI) else ActClueAPI.model_validate(item)
+            clue_api = (
+                item
+                if isinstance(item, ActClueAPI)
+                else ActClueAPI.model_validate(item)
+            )
             clues.append(clue_api.to_internal())
         return participants, clues
 
@@ -187,16 +194,6 @@ class ActClue(PairClue):
     valence: ValenceCore
     pattern: str
     axes: Axes
-
-    @computed_field(return_type=str)
-    @property
-    def stance(self) -> str:
-        return "cooperation" if self.valence == "positive" else "hostility"
-
-    @computed_field(return_type=str)
-    @property
-    def subtype(self) -> str:
-        return self.pattern
 
 
 class ActClueAPI(EvidenceClippingMixin):

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import (
-    TYPE_CHECKING,
     Any,
     Dict,
     Iterable,
@@ -17,22 +17,8 @@ from pydantic import BaseModel
 
 from schema import BaseClue, ValidationResult
 
-if TYPE_CHECKING:
-    from framework.registry import ClueRegistry, ProcessorResultRegistry
-
 T = TypeVar("T")
 BaseClueT = TypeVar("BaseClueT", bound=BaseClue)
-
-
-class PipelineResultSnapshot(BaseModel):
-    """Serializable view of PipelineResult for checkpointing."""
-
-    scenes: list[dict[str, Any]]
-    metadata: dict[int, dict[str, Any]]
-    context: dict[str, Any]
-    participants: dict[int, list[str]]
-    clues: dict[str, list[dict[str, Any]]]
-    outputs: dict[str, dict[str, Any]]
 
 
 class PipelineResult:
@@ -120,51 +106,24 @@ class PipelineResult:
     def clear_outputs(self) -> None:
         self._outputs.clear()
 
-    def checkpoint_state(self) -> PipelineResultSnapshot:
-        """Materialize the current state into a checkpoint snapshot."""
+    def save(self, path: Path) -> None:
+        import pickle
 
-        return PipelineResultSnapshot(
-            scenes=[dict(scene) for scene in self.scenes],
-            metadata={int(k): dict(v) for k, v in self.metadata.items()},
-            context=dict(self.context),
-            participants={int(k): list(v) for k, v in self.participants.items()},
-            clues={
-                clue_type.__name__: [clue.model_dump() for clue in clues]
-                for clue_type, clues in self._clues.items()
-            },
-            outputs={
-                type(output).__name__: output.model_dump()
-                for output in self._outputs.values()
-            },
-        )
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(pickle.dumps(self))
 
-    def restore_state(
-        self,
-        snapshot: PipelineResultSnapshot,
-        registry: "ClueRegistry",
-        result_registry: "ProcessorResultRegistry",
-    ) -> None:
-        """Restore state from a previously captured snapshot."""
+    @staticmethod
+    def load(path: Path) -> "PipelineResult":
+        import pickle
 
-        self.scenes = [dict(scene) for scene in snapshot.scenes]
-        self.metadata = {int(k): dict(v) for k, v in snapshot.metadata.items()}
-        self.context = dict(snapshot.context)
-        self.participants = {
-            int(k): list(v) for k, v in snapshot.participants.items()
-        }
+        target = Path(path)
+        return pickle.loads(target.read_bytes())
 
-        self._clues.clear()
-        for clue_name, clue_dicts in snapshot.clues.items():
-            clue_type = registry.get_type(clue_name)
-            self._clues[clue_type] = [
-                clue_type.model_validate(clue_dict) for clue_dict in clue_dicts
-            ]
+    def copy(self) -> "PipelineResult":
+        import copy
 
-        self._outputs.clear()
-        for output_name, data in snapshot.outputs.items():
-            if result_registry.has_type(output_name):
-                output_type = result_registry.get_type(output_name)
-                self._outputs[output_type] = output_type.model_validate(data)
+        return copy.deepcopy(self)
 
 
-__all__ = ["PipelineResult", "PipelineResultSnapshot"]
+__all__ = ["PipelineResult"]

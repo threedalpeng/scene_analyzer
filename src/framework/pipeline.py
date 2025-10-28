@@ -2,15 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, Sequence, Type
+from typing import Any, Literal, Mapping, Sequence, Type, TypeGuard
 
 from google import genai
 
 from framework.base import ClueExtractor
 from framework.batch import BatchExtractor, CombinedBatchExtractor
-from framework.checkpoint_session import CheckpointSession
 from framework.processor import Processor
-from framework.registry import ClueRegistry, ProcessorResultRegistry
+from framework.registry import ClueRegistry
 from framework.result import PipelineResult
 from framework.validation import ValidationContext, ValidationPipeline
 from schema import BaseClue
@@ -22,8 +21,9 @@ class PipelineConfig:
     batch_size: int = 50
     validate: bool = True
     strict_validation: bool = False
-    checkpoint_enabled: bool = False
-    output_dir: Path | None = None
+
+
+CheckpointMarker = tuple[Literal["checkpoint"], str]
 
 
 class Pipeline:
@@ -32,10 +32,8 @@ class Pipeline:
         config: PipelineConfig | None = None,
     ) -> None:
         self.config = config or PipelineConfig()
-        self._extractors: list[ClueExtractor] = []
-        self._processors: list[Processor] = []
+        self._stages: list[list[ClueExtractor] | Processor | CheckpointMarker] = []
         self._registry = ClueRegistry()
-        self._result_registry = ProcessorResultRegistry()
 
     ##################
     ### Public API ###
@@ -67,18 +65,36 @@ class Pipeline:
         else:
             instance = self._instantiate_extractor(extractor, params)
 
-        self._extractors.append(instance)
-        for member in instance.registry_members():
-            self._registry.register(member)
+        stage_members = [instance]
+        self._register_extractor_stage(stage_members)
+        self._stages.append(stage_members)
         return self
 
     def process(self, processor: Processor) -> "Pipeline":
-        self._processors.append(processor)
-        result_type = processor.result_type
-        if result_type is not None and not self._result_registry.has_type(
-            result_type.__name__
-        ):
-            self._result_registry.register(result_type)
+        self._stages.append(processor)
+        return self
+
+    def pipe(self, other: "Pipeline") -> "Pipeline":
+        for stage in other._stages:
+            if isinstance(stage, list):
+                new_stage = list(stage)
+                self._register_extractor_stage(new_stage)
+                self._stages.append(new_stage)
+            elif self._is_processor_stage(stage):
+                self._stages.append(stage)
+            elif isinstance(stage, tuple) and stage[0] == "checkpoint":
+                self._stages.append(stage)
+            else:
+                raise TypeError(
+                    f"Unsupported pipeline stage type: {type(stage).__name__}"
+                )
+
+        return self
+
+    def checkpoint(self, name: str) -> "Pipeline":
+        if not name:
+            raise ValueError("Checkpoint name must be a non-empty string")
+        self._stages.append(("checkpoint", name))
         return self
 
     def run(
@@ -87,26 +103,53 @@ class Pipeline:
         *,
         metadata: dict[int, dict] | None = None,
         context: Mapping[str, Any] | None = None,
-        resume: bool = False,
+        checkpoint_dir: Path | None = None,
+        load_checkpoint: Path | None = None,
+        resume_from: str | None = None,
+        stop_at: str | None = None,
+        auto_save: bool = False,
     ) -> PipelineResult:
-        if not scenes:
+        if not scenes and load_checkpoint is None:
             raise ValueError("Pipeline requires at least one scene")
 
         metadata = metadata or {}
-        session = self._create_session(resume)
-        if session and not session.validate_inputs(scenes, metadata):
-            raise ValueError("Input mismatch with checkpoint")
+        result, derived_resume = self._initialize_result(
+            scenes, metadata, context, load_checkpoint
+        )
+        effective_resume = resume_from or derived_resume
 
-        result = self._initialize_result(session, scenes, metadata, context)
+        skip_until = effective_resume
+        for stage in self._stages:
+            if isinstance(stage, tuple) and stage[0] == "checkpoint":
+                checkpoint_name = stage[1]
+                if auto_save and checkpoint_dir is not None:
+                    path = checkpoint_dir / f"{checkpoint_name}.pkl"
+                    result.save(path)
+                if skip_until == checkpoint_name:
+                    skip_until = None
+                if stop_at == checkpoint_name:
+                    break
+                continue
 
-        self._run_extractors(scenes, result, session)
-        self._run_processors(result, session)
+            if skip_until:
+                continue
+
+            if isinstance(stage, list):
+                self._run_extractor_stage(stage, scenes, result)
+            elif self._is_processor_stage(stage):
+                self._run_processor_stage(stage, result)
+            else:
+                raise TypeError(
+                    f"Unsupported pipeline stage type: {type(stage).__name__}"
+                )
+
+        if effective_resume and skip_until:
+            raise ValueError(
+                f"Checkpoint '{effective_resume}' not found in pipeline stages"
+            )
 
         if self.config.validate:
             self._validate(result)
-
-        if session:
-            session.save_result(result)
 
         return result
 
@@ -121,94 +164,94 @@ class Pipeline:
             raise ValueError("keyword overrides require extractor class input")
         return extractor
 
-    def _create_session(self, resume: bool) -> CheckpointSession | None:
-        if not self.config.checkpoint_enabled or self.config.output_dir is None:
-            return None
-        checkpoint_dir = self.config.output_dir / "checkpoint"
-        return CheckpointSession(checkpoint_dir, resume=resume)
-
     def _initialize_result(
         self,
-        session: CheckpointSession | None,
         scenes: list[dict],
         metadata: Mapping[int, Mapping[str, Any]],
         context: Mapping[str, Any] | None,
-    ) -> PipelineResult:
-        if session and session.can_resume():
-            return session.load_result(self._registry, self._result_registry)
+        load_checkpoint: Path | None,
+    ) -> tuple[PipelineResult, str | None]:
+        normalized_metadata = {int(k): dict(v) for k, v in (metadata or {}).items()}
+
+        if load_checkpoint:
+            result = PipelineResult.load(load_checkpoint)
+            if normalized_metadata:
+                result.metadata.update(normalized_metadata)
+            if context:
+                result.context.update(dict(context))
+            return result, load_checkpoint.stem
+
+        if not scenes:
+            raise ValueError("Pipeline requires at least one scene")
 
         result = PipelineResult()
         result.scenes = [dict(item) for item in scenes]
-        result.metadata = {int(k): dict(v) for k, v in metadata.items()}
+        result.metadata = normalized_metadata
         if context:
             result.context.update(dict(context))
-        return result
+        return result, None
 
-    def _run_extractors(
+    def _register_extractor_stage(
+        self, extractors: Sequence[ClueExtractor]
+    ) -> None:
+        for extractor in extractors:
+            for member in extractor.registry_members():
+                if member.clue_type not in self._registry:
+                    self._registry.register(member)
+
+    def _run_extractor_stage(
         self,
+        extractors: list[ClueExtractor],
         scenes: list[dict],
         result: PipelineResult,
-        session: CheckpointSession | None,
     ) -> None:
-        for extractor in self._extractors:
+        if not scenes:
+            raise ValueError("Extractor stage requires at least one scene")
+
+        entries: list[tuple[int, str]] = [
+            (int(entry["scene"]), str(entry["text"])) for entry in scenes
+        ]
+
+        for extractor in extractors:
             extractor.configure(self.config)
-            extractor_id = extractor.checkpoint_id()
-
-            pending: list[tuple[int, str]] = []
-            for entry in scenes:
-                scene_id = int(entry["scene"])
-                if session and session.is_scene_completed(extractor_id, scene_id):
-                    continue
-                pending.append((scene_id, str(entry["text"])))
-
-            if not pending:
-                continue
 
             if isinstance(extractor, BatchExtractor):
+                if not entries:
+                    continue
                 batch_size = max(1, extractor.effective_batch_size())
-                for idx in range(0, len(pending), batch_size):
-                    batch = pending[idx : idx + batch_size]
+                for idx in range(0, len(entries), batch_size):
+                    batch = entries[idx : idx + batch_size]
                     clues = extractor.batch_extract(batch)
                     self._merge_extractor_output(extractor, clues, result)
 
                     participants = extractor.participants()
-                    completed_ids: list[int] = []
                     for scene_id, _ in batch:
                         names = participants.get(scene_id)
                         if names:
                             result.put_participants(scene_id, names)
-                        completed_ids.append(scene_id)
-
-                    if session:
-                        session.mark_scenes_completed(extractor_id, completed_ids)
-                        session.save_result(result)
             else:
-                for scene_id, text in pending:
+                for scene_id, text in entries:
                     clues = extractor.extract(text, scene_id)
                     result.append_clues(extractor.clue_type, clues)
-                    if session:
-                        session.mark_scenes_completed(extractor_id, [scene_id])
-                        session.save_result(result)
 
-    def _run_processors(
-        self,
-        result: PipelineResult,
-        session: CheckpointSession | None,
+    def _run_processor_stage(
+        self, processor: Processor, result: PipelineResult
     ) -> None:
-        for processor in self._processors:
-            processor.configure(self.config)
-            processor_id = processor.checkpoint_id()
+        processor.configure(self.config)
+        output = processor(result)
+        if output is not None:
+            result.put_output(output)
 
-            if session and session.is_processor_completed(processor_id):
-                continue
-
-            output = processor(result)
-            if output is not None:
-                result.put_output(output)
-
-            if session:
-                session.mark_processor_completed(processor_id)
-                session.save_result(result)
+    @staticmethod
+    def _is_processor_stage(stage: Any) -> TypeGuard[Processor]:
+        return (
+            hasattr(stage, "configure")
+            and callable(getattr(stage, "configure"))
+            and callable(getattr(stage, "__call__", None))
+            and hasattr(stage, "checkpoint_id")
+            and callable(getattr(stage, "checkpoint_id"))
+            and hasattr(stage, "result_type")
+        )
 
     def _validate(self, result: PipelineResult) -> None:
         validator = ValidationPipeline(self._registry)
