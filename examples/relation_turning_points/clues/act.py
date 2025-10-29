@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import TYPE_CHECKING, Any, Literal, Mapping, Sequence, Type
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, Mapping, Sequence, Type
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from framework.core.base import ClueValidator
 from framework.core.batch import BatchExtractor
@@ -12,7 +12,7 @@ from schema import (
     Durability,
     EvidenceClippingMixin,
     GoalAlignment,
-    PairClue,
+    DirectedPairClue,
     Salience,
     Stakes,
     Volition,
@@ -36,33 +36,16 @@ def act_score(clue: "ActClue") -> int:
 
 
 def explode_directed(acts: Sequence["ActClue"]) -> list["ActClue"]:
-    out: list[ActClue] = []
-    for act in acts:
-        actors = act.actors or [act.pair[0]]
-        targets = act.targets or [act.pair[1]]
-        for src in actors:
-            for dst in targets:
-                if src.lower() == dst.lower():
-                    continue
-                out.append(
-                    act.model_copy(
-                        update={
-                            "id": f"{act.id}__{src}->{dst}",
-                            "actors": [src],
-                            "targets": [dst],
-                            "pair": tuple(sorted((src, dst))),
-                        }
-                    )
-                )
-    return out
+    """Acts are already directed; filter out self-referential entries."""
+    return [act for act in acts if act.source.lower() != act.target.lower()]
 
 
 def bundle_same_segment(acts: Sequence["ActClue"]) -> list["ActClue"]:
     buckets: dict[tuple[int, str, str, str, str], list[ActClue]] = defaultdict(list)
     for act in acts:
-        src = act.actors[0] if act.actors else act.pair[0]
-        dst = act.targets[0] if act.targets else act.pair[1]
-        buckets[(act.segment, src, dst, act.valence, act.pattern)].append(act)
+        buckets[(act.segment, act.source, act.target, act.valence, act.pattern)].append(
+            act
+        )
 
     representatives: list[ActClue] = []
     for items in buckets.values():
@@ -75,6 +58,11 @@ def bundle_same_segment(acts: Sequence["ActClue"]) -> list["ActClue"]:
 class ActValidator(ClueValidator):
     def validate_semantic(self, clue: "ActClue") -> ValidationResult:
         warnings: list[str] = []
+        if clue.source.strip().lower() == clue.target.strip().lower():
+            return ValidationResult.fail(
+                level="semantic",
+                errors=["actor and target must be different individuals"],
+            )
         if clue.axes.stakes == "major" and not clue.referenced_segments:
             warnings.append("major stakes usually reference downstream segments")
         return ValidationResult.ok(level="semantic", warnings=warnings)
@@ -154,7 +142,7 @@ class ActExtractor(BatchExtractor):
                 if isinstance(item, ActClueAPI)
                 else ActClueAPI.model_validate(item)
             )
-            clues.append(clue_api.to_internal())
+            clues.extend(clue_api.to_internal())
         return participants, clues
 
     def get_api_model(self) -> Type[BaseModel]:
@@ -178,10 +166,12 @@ class Axes(BaseModel):
     goal_alignment: GoalAlignment
 
 
-class ActClue(PairClue):
+class ActClue(DirectedPairClue):
+    source_field: ClassVar[str] = "source"
+    target_field: ClassVar[str] = "target"
     clue_type: Literal["act"] = "act"
-    actors: list[str] = Field(default_factory=list)
-    targets: list[str] = Field(default_factory=list)
+    source: str
+    target: str
     valence: ValenceCore
     pattern: str
     axes: Axes
@@ -190,7 +180,6 @@ class ActClue(PairClue):
 class ActClueAPI(EvidenceClippingMixin):
     id: str | None = None
     segment: int
-    pair: list[str] = Field(min_length=2, max_length=2)
     clue_type: Literal["act"] = "act"
     evidence: str
     actors: list[str] = Field(default_factory=list)
@@ -200,11 +189,46 @@ class ActClueAPI(EvidenceClippingMixin):
     axes: Axes
     referenced_segments: list[int] = Field(default_factory=list)
 
-    def to_internal(self) -> ActClue:
-        data = self.model_dump()
-        data["pair"] = tuple(data["pair"])
-        data["id"] = data.get("id") or ""
-        return ActClue.model_validate(data)
+    @field_validator("actors", "targets")
+    @classmethod
+    def _strip_list(cls, value: list[str]) -> list[str]:
+        return [v.strip() for v in value if v and v.strip()]
+
+    def to_internal(self) -> list[ActClue]:
+        base = self.model_dump()
+        base_id = (base.get("id") or "").strip()
+        segment = base["segment"]
+        pattern = base["pattern"]
+        actors: list[str] = base.get("actors", []) or []
+        targets: list[str] = base.get("targets", []) or []
+        if not actors or not targets:
+            raise ValueError("Act clue requires at least one actor and one target")
+
+        combos: list[ActClue] = []
+        for src in actors:
+            for dst in targets:
+                if src.lower() == dst.lower():
+                    continue
+                suffix = f"{src}->{dst}"
+                if base_id:
+                    clue_id = f"{base_id}__{suffix}"
+                else:
+                    clue_id = f"seg{segment}_{pattern}__{suffix}"
+                data = {
+                    "id": clue_id,
+                    "segment": segment,
+                    "clue_type": base["clue_type"],
+                    "evidence": base["evidence"],
+                    "references": base.get("references", []),
+                    "referenced_segments": base.get("referenced_segments", []),
+                    "source": src,
+                    "target": dst,
+                    "valence": base["valence"],
+                    "pattern": base["pattern"],
+                    "axes": base["axes"],
+                }
+                combos.append(ActClue.model_validate(data))
+        return combos
 
 
 __all__ = [

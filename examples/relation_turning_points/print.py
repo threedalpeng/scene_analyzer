@@ -5,14 +5,17 @@ Act, ToM, Dyad 정보를 timeline 순서로 표시
 """
 
 import json
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import cast
 
 from clues.act import ActClue
 from clues.tom import ToMClue
+from processors.synthesis import compute_initial_state
+from schema import FinalRelation, TurningEntry
+
 from framework.utils import norm_pair
-from schema import TurningEntry, FinalRelation
 
 
 @dataclass
@@ -132,8 +135,8 @@ def build_timeline(
 
 def format_act_brief(act: ActClue, show_role: bool = False) -> str:
     """Act를 간략하게 포맷"""
-    actors = "→".join(act.actors) if act.actors else act.pair[0]
-    targets = "→".join(act.targets) if act.targets else act.pair[1]
+    actor = act.source
+    target = act.target
 
     role_marker = ""
     if show_role:
@@ -141,7 +144,7 @@ def format_act_brief(act: ActClue, show_role: bool = False) -> str:
         role_marker = " [SUPPORT]" if hasattr(act, "_is_supporting") else role_marker
 
     return (
-        f"    [{act.valence:>8}] {actors} → {targets}: {act.pattern}\n"
+        f"    [{act.valence:>8}] {actor} → {target}: {act.pattern}\n"
         f"                Stakes={act.axes.stakes}, Salience={act.axes.salience}, "
         f"Durability={act.axes.durability}{role_marker}\n"
         f'                "{act.evidence[:100]}..."'
@@ -151,7 +154,7 @@ def format_act_brief(act: ActClue, show_role: bool = False) -> str:
 def format_tom_brief(tom: ToMClue) -> str:
     """ToM을 간략하게 포맷"""
     return (
-        f"    [{tom.kind:>12}] {tom.pair[0]} about {tom.pair[1]}\n"
+        f"    [{tom.kind:>12}] {tom.thinker} about {tom.target}\n"
         f'                Claim: "{tom.claim}"\n'
         f'                Evidence: "{tom.evidence[:100]}..."'
     )
@@ -178,7 +181,7 @@ def print_timeline(events: list[TimelineEvent]):
         print()
         return
 
-    current_segment = None
+    current_segment: int | None = None
     for event in events:
         if current_segment != event.segment:
             if current_segment is not None:
@@ -195,11 +198,82 @@ def print_timeline(events: list[TimelineEvent]):
 
         if event.event_type == "act":
             print(f"  ACT [{event.clue.id}]{role_marker}")
-            print(format_act_brief(event.clue))
+            print(format_act_brief(cast(ActClue, event.clue)))
         else:
             print(f"  ToM [{event.clue.id}]{role_marker}")
-            print(format_tom_brief(event.clue))
+            print(format_tom_brief(cast(ToMClue, event.clue)))
         print()
+
+    print()
+
+
+def _split_by_windows(acts: list[ActClue]) -> dict[str, list[ActClue]]:
+    windows = {"early": [], "middle": [], "late": []}
+    if not acts:
+        return windows
+
+    ordered = sorted(acts, key=lambda a: a.segment)
+    min_seg = ordered[0].segment
+    max_seg = ordered[-1].segment
+    if max_seg == min_seg:
+        windows["early"] = ordered
+        return windows
+
+    span = max_seg - min_seg + 1
+    cut1 = min_seg + (span / 3)
+    cut2 = min_seg + (2 * span / 3)
+
+    for act in ordered:
+        if act.segment <= cut1:
+            windows["early"].append(act)
+        elif act.segment <= cut2:
+            windows["middle"].append(act)
+        else:
+            windows["late"].append(act)
+    return windows
+
+
+def print_timeline_summary(acts: list[ActClue]) -> None:
+    """Temporal window 요약 출력"""
+    print("┌" + "─" * 98 + "┐")
+    print("│" + " TIMELINE SUMMARY BY WINDOW ".center(98) + "│")
+    print("└" + "─" * 98 + "┘")
+    print()
+
+    if not acts:
+        print("  (No acts to summarize)")
+        print()
+        return
+
+    windows = _split_by_windows(acts)
+    label_order = [
+        ("early", "Early"),
+        ("middle", "Middle"),
+        ("late", "Late"),
+    ]
+    ratios: dict[str, float] = {}
+    for key, label in label_order:
+        bucket = windows[key]
+        if bucket:
+            pos = sum(1 for act in bucket if act.valence == "positive")
+            ratio = pos / len(bucket)
+            ratios[key] = ratio
+            start = bucket[0].segment
+            end = bucket[-1].segment
+            print(
+                f"Segments {start:03d}-{end:03d} ({label}): "
+                f"{len(bucket):>3} acts, {ratio * 100:5.1f}% positive"
+            )
+        else:
+            ratios[key] = 0.0
+            print(f"Segments --- ({label}):   0 acts,  0.0% positive")
+
+    early = ratios.get("early", 0.0)
+    late = ratios.get("late", 0.0)
+    if early - late >= 0.4:
+        print(" " * 46 + "↓ clear reversal")
+    elif late - early >= 0.4:
+        print(" " * 46 + "↑ strong recovery")
 
     print()
 
@@ -270,23 +344,26 @@ def print_statistics(
             f"  Valence: {pos} positive, {neg} negative ({pos / (pos + neg) * 100:.1f}% positive)"
         )
 
-        from collections import Counter
-
         stakes = Counter(a.axes.stakes for a in acts)
         print(
             f"  Stakes: major={stakes['major']}, moderate={stakes['moderate']}, "
             f"minor={stakes['minor']}"
         )
+
+        initial = compute_initial_state(acts)
+        print("  Computed Initial State:")
+        print(f"    valence={initial['valence']}, durability={initial['durability']}")
+        based_on = initial.get("based_on")
+        if based_on:
+            print(f"    based_on={based_on}")
     print()
 
     # ToM 통계
     print("Theory-of-Mind Clues:")
     print(f"  Total: {len(toms)}")
     if toms:
-        from collections import Counter
-
         kinds = Counter(t.kind for t in toms)
-        print(f"  Kinds: ", end="")
+        print("  Kinds: ", end="")
         print(", ".join(f"{k}={v}" for k, v in kinds.most_common()))
     print()
 
@@ -320,6 +397,7 @@ def generate_report(output_dir: Path, char1: str, char2: str):
     # 리포트 출력
     print_header(char1, char2)
     print_timeline(timeline)
+    print_timeline_summary(acts)
 
     if dyad_info:
         print_turning_points(dyad_info.turning_timeline)

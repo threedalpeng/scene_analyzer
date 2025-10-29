@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import ClassVar, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -32,6 +32,31 @@ class PairClue(BaseClue):
         if len(value) != 2:
             raise ValueError("pair must contain exactly two entries")
         a, b = sorted(value)
+        return a, b
+
+
+class DirectedPairClue(BaseClue):
+    """
+    Base class for directed pair clues.
+
+    Subclasses must set `source_field` and `target_field` to the corresponding
+    attribute names that hold the directional endpoints (e.g. thinker/target).
+    """
+
+    source_field: ClassVar[str] = "source"
+    target_field: ClassVar[str] = "target"
+
+    @property
+    def pair(self) -> tuple[str, str]:
+        """Sorted tuple for downstream dyad grouping while preserving direction via source/target."""
+        data = object.__getattribute__(self, "__dict__")
+        src = data.get(self.source_field)
+        dst = data.get(self.target_field)
+        if src is None or dst is None:
+            raise AttributeError(
+                f"Directed clue missing endpoints: {self.source_field}, {self.target_field}"
+            )
+        a, b = sorted((src, dst))
         return a, b
 
 

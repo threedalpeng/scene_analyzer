@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from clues.act import ActExtractor
+from clues.entity import EntityExtractor
 from clues.tom import ToMExtractor
 from processors.aliasing import AliasResolver
 from processors.result_saver import ResultSaver
@@ -60,6 +61,19 @@ def main() -> None:
     parser.add_argument(
         "--batch", type=int, default=50, help="Batch size for Gemini requests"
     )
+    parser.add_argument(
+        "--resume-from",
+        choices=["extraction", "aliasing", "synthesis"],
+        default=None,
+        help="Resume pipeline execution after the named checkpoint",
+    )
+    parser.add_argument(
+        "--stop-at",
+        choices=["extraction", "aliasing", "synthesis"],
+        default=None,
+        help="Stop pipeline once the named checkpoint is reached",
+    )
+
     args = parser.parse_args()
 
     ensure_dir(args.out)
@@ -68,16 +82,40 @@ def main() -> None:
     config = PipelineConfig(client=client, batch_size=args.batch)
     pipeline = (
         Pipeline(config)
-        .extract([ActExtractor, ToMExtractor])
+        .extract([ActExtractor, ToMExtractor, EntityExtractor])
+        .checkpoint("extraction")
+        .validate(strict=False)
         .process(AliasResolver())
+        .checkpoint("aliasing")
+        .validate(strict=False)
         .process(DyadSynthesizer())
+        .checkpoint("synthesis")
         .process(ResultSaver(args.out))
     )
 
     segments = _load_segments(args.segments)
 
     log_status("Starting pipeline run")
-    pipeline.run(segments)
+    checkpoint_dir = args.out / "checkpoints"
+    ensure_dir(checkpoint_dir)
+    load_checkpoint = None
+    if args.resume_from:
+        candidate = checkpoint_dir / f"{args.resume_from}.pkl"
+        if candidate.exists():
+            log_status(f"Loading checkpoint '{args.resume_from}' from {candidate}")
+            load_checkpoint = candidate
+        else:
+            log_status(
+                f"Checkpoint '{args.resume_from}' not found at {candidate}; running stages from scratch"
+            )
+    pipeline.run(
+        segments,
+        checkpoint_dir=checkpoint_dir,
+        auto_save=True,
+        load_checkpoint=load_checkpoint,
+        resume_from=args.resume_from,
+        stop_at=args.stop_at,
+    )
 
     log_status("Pipeline completed")
 

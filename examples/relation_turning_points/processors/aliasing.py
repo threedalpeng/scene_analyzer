@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 from framework.core.processor import Processor
 from framework.core.result import PipelineResult
-from framework.utils import norm_pair, parse_model
+from framework.utils import parse_model
 
 if TYPE_CHECKING:
     from framework.core.pipeline import PipelineConfig
@@ -57,12 +57,12 @@ class AliasResolver(Processor):
         toms = result.get_clues(ToMClue)
 
         for act in acts:
-            act.actors = [alias_name(name, alias_map) for name in act.actors]
-            act.targets = [alias_name(name, alias_map) for name in act.targets]
-            act.pair = alias_pair(act.pair, alias_map)
+            act.source = alias_name(act.source, alias_map)
+            act.target = alias_name(act.target, alias_map)
 
         for tom in toms:
-            tom.pair = alias_pair(tom.pair, alias_map)
+            tom.thinker = alias_name(tom.thinker, alias_map)
+            tom.target = alias_name(tom.target, alias_map)
 
         result.set_clues(ActClue, acts)
         result.set_clues(ToMClue, toms)
@@ -115,10 +115,12 @@ class AliasResolver(Processor):
         appearances: dict[str, set[int]] = defaultdict(set)
 
         for clue in [*result.get_clues(ActClue), *result.get_clues(ToMClue)]:
-            pair = clue.pair
-            unique_names.update(pair)
-            appearances[pair[0]].add(clue.segment)
-            appearances[pair[1]].add(clue.segment)
+            unique_names.add(clue.source if isinstance(clue, ActClue) else clue.thinker)
+            unique_names.add(clue.target)
+            appearances[clue.source if isinstance(clue, ActClue) else clue.thinker].add(
+                clue.segment
+            )
+            appearances[clue.target].add(clue.segment)
 
         return sorted(unique_names), {k: sorted(v) for k, v in appearances.items()}
 
@@ -189,11 +191,6 @@ def alias_name(n: str, amap: dict[str, str]) -> str:
     return n
 
 
-def alias_pair(p: tuple[str, str], amap: dict[str, str]) -> tuple[str, str]:
-    """Apply alias map to a pair."""
-    return norm_pair(alias_name(p[0], amap), alias_name(p[1], amap))
-
-
 class AliasGroup(BaseModel):
     canonical: str
     aliases: list[str]
@@ -208,4 +205,4 @@ class AliasingResult(BaseModel):
     alias_map: dict[str, str]
 
 
-__all__ = ["AliasResolver", "AliasingResult", "alias_name", "alias_pair"]
+__all__ = ["AliasResolver", "AliasingResult", "alias_name"]

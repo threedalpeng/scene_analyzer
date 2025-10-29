@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Literal, Mapping, Type
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, field_validator
+from schema import DirectedPairClue, EvidenceClippingMixin
 
 from framework.core.base import ClueValidator
 from framework.core.batch import BatchExtractor
 from framework.schema import ValidationResult
-from schema import EvidenceClippingMixin, PairClue
 from framework.utils import parse_model
 
 if TYPE_CHECKING:
@@ -19,6 +19,11 @@ class ToMValidator(ClueValidator):
         if not clue.claim:
             return ValidationResult.fail(
                 level="semantic", errors=["claim must be non-empty"]
+            )
+        if clue.thinker.strip().lower() == clue.target.strip().lower():
+            return ValidationResult.fail(
+                level="semantic",
+                errors=["thinker and target must be different individuals"],
             )
         return ValidationResult.ok(level="semantic")
 
@@ -99,8 +104,12 @@ class ToMExtractor(BatchExtractor):
 ToMKind = Literal["BelievesAbout", "FeelsTowards", "IntendsTo", "DesiresFor"]
 
 
-class ToMClue(PairClue):
+class ToMClue(DirectedPairClue):
+    source_field = "thinker"
+    target_field = "target"
     clue_type: Literal["tom"] = "tom"
+    thinker: str
+    target: str
     kind: ToMKind
     claim: str
 
@@ -108,15 +117,20 @@ class ToMClue(PairClue):
 class ToMClueAPI(EvidenceClippingMixin):
     id: str | None = None
     segment: int
-    pair: list[str] = Field(min_length=2, max_length=2)
+    thinker: str
+    target: str
     clue_type: Literal["tom"] = "tom"
     evidence: str
     kind: ToMKind
     claim: str
 
+    @field_validator("thinker", "target")
+    @classmethod
+    def _strip(cls, value: str) -> str:
+        return value.strip()
+
     def to_internal(self) -> ToMClue:
         data = self.model_dump()
-        data["pair"] = tuple(data["pair"])
         data["id"] = data.get("id") or ""
         return ToMClue.model_validate(data)
 

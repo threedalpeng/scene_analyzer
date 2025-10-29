@@ -5,7 +5,7 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Iterable, Type
 
-from clues.act import ActClue, act_score, bundle_same_segment, explode_directed
+from clues.act import ActClue, act_score
 from clues.tom import ToMClue
 from google import genai
 from google.genai import types
@@ -21,59 +21,45 @@ if TYPE_CHECKING:
 
 
 DYAD_SYSTEM_PROMPT = """
-You adjudicate relationship state across segments for a dyad (character pair).
-Use ONLY the provided clue packs and return strict JSON per schema.
-You can update the relation states using evidences if they don't match.
+You analyze relationship change between two characters.
 
-CORE CONCEPTS:
+INPUT JSON PROVIDES:
+  - acts: Chronological action clues (max 30) between the pair.
+  - toms: Theory-of-mind clues (max 20) such as beliefs, feelings, intentions.
+  - statistics: Aggregate counts for the full data (not just the sample).
+  - computed_initial_state: Baseline relationship state computed from early acts.
 
-Turning: A qualitative change in relationship state.
-Category (required): Reversal, Strengthening, Commitment, Dissolution.
-Pattern: Free-form label describing the domain-specific pattern (e.g., "betrayal").
+TASK:
+  Identify turning points where the relationship state (valence and/or durability) shifts in a durable way.
 
-Turning Detection Logic:
-  1. Identify candidate when there is a category change meeting the threshold.
-  2. Threshold: stakes="major" OR (salience="high" AND durability="persistent") OR referenced_segments present.
-  3. Verify representative act exists.
-  4. Check for implicit turns: IntendsTo/DesiresFor followed within ≤2 segments by consistent action.
+TURNING POINT REQUIREMENTS:
+  1. Clear before/after difference in relationship state.
+  2. Representative act drawn from the provided `acts`.
+  3. Evidence grounded in the supplied clues (avoid speculation).
 
-Pre/Post State:
-  - pre_state: valence/durability before the turn.
-  - post_state: valence/durability after the representative act.
-  - Include optional label to clarify the narrative state if helpful.
+CATEGORIES:
+  - Reversal: Valence flips (positive ↔ negative).
+  - Strengthening: Same valence, durability increases.
+  - Dissolution: Relationship breaks down or hostility becomes irreversible.
+  - Commitment: Relationship solidifies or deepens positively.
 
-Final Relation:
-  - Summarize the overall relationship (valence + optional label).
+OUTPUT RULES:
+  - Use `computed_initial_state` as the pre-state for the first confirmed turning, unless contradicted by evidence.
+  - For each turning point provide: segment, category, pattern, summary, quote, representative_act_id, caused_by_tom_ids, pre_state, post_state.
+  - event_roles must label relevant acts/ToMs as "turning" or "supporting" when they contribute evidence.
+  - final_relation should describe the end state (valence plus optional label).
+  - Representative act IDs must exactly match one of the supplied `acts`.
+  - Derive pre/post states using evidence within roughly ±5 segments of the turning event.
+  - If evidence is insufficient, omit the turning point rather than guessing.
 
-ID Rules:
-  - Preserve ids exactly as provided.
-  - representative_act_id must match an act id from input.
-  - caused_by_tom_ids must reference ToM ids when used.
-
-Output JSON must match the provided schema exactly.
-"""
-
-
-def _dyad_user_payload(
-    dossier_lines: list[str], tom_lines: list[str], causal_json: dict, stats_json: dict
-) -> str:
-    return (
-        "DYAD_DOSSIER:\n"
-        + "\n".join(dossier_lines)
-        + "\n\nTOM_THREADS:\n"
-        + "\n".join(tom_lines)
-        + "\n\nCAUSAL_CHAIN:\n"
-        + json.dumps(causal_json, ensure_ascii=False, indent=2)
-        + "\n\nSTATS:\n"
-        + json.dumps(stats_json, ensure_ascii=False, indent=2)
-    ).strip()
+Return valid JSON conforming to LLMAdjudication.
+""".strip()
 
 
 @dataclass
 class DyadBag:
     pair: tuple[str, str]
-    acts_rep: list[ActClue] = field(default_factory=list)
-    acts_all: list[ActClue] = field(default_factory=list)
+    acts: list[ActClue] = field(default_factory=list)
     toms: list[ToMClue] = field(default_factory=list)
 
 
@@ -84,13 +70,11 @@ class DyadAnalysis(BaseModel):
 
 
 class SynthesisResult(BaseModel):
-    acts_representative: list[ActClue]
-    acts_directed: list[ActClue]
     dyads: list[DyadAnalysis]
 
 
 def build_bags(
-    toms: list[ToMClue], acts_rep: list[ActClue], acts_all: list[ActClue]
+    toms: list[ToMClue], acts: list[ActClue]
 ) -> dict[tuple[str, str], DyadBag]:
     bags: dict[tuple[str, str], DyadBag] = {}
 
@@ -99,67 +83,162 @@ def build_bags(
             bags[pair] = DyadBag(pair=pair)
         return bags[pair]
 
-    for act in acts_rep:
-        ensure(act.pair).acts_rep.append(act)
-    for act in acts_all:
-        ensure(act.pair).acts_all.append(act)
+    for act in acts:
+        ensure(act.pair).acts.append(act)
     for tom in toms:
         ensure(tom.pair).toms.append(tom)
 
     for bag in bags.values():
-        bag.acts_rep.sort(key=lambda x: x.segment)
-        bag.acts_all.sort(key=lambda x: x.segment)
+        bag.acts.sort(key=lambda x: x.segment)
         bag.toms.sort(key=lambda x: x.segment)
 
     return bags
 
 
-def _sample_dossier(acts_rep: list[ActClue]) -> list[ActClue]:
-    if not acts_rep:
+def _select_acts_for_dossier(
+    acts: list[ActClue],
+    *,
+    limit: int = 30,
+    initial_count: int = 5,
+    final_count: int = 5,
+) -> list[ActClue]:
+    if not acts:
         return []
-    items = sorted(acts_rep, key=act_score, reverse=True)
-    rep = items[0]
-    supports = [a for a in items[1:] if a.valence != rep.valence][:1]
-    if len(supports) < 1 and len(items) > 1:
-        supports = [items[1]]
-    return [rep, *supports]
+
+    ordered = sorted(acts, key=lambda a: a.segment)
+    selected: dict[str, ActClue] = {}
+
+    def _add(group: Iterable[ActClue]) -> None:
+        for act in group:
+            if act.id not in selected:
+                selected[act.id] = act
+
+    majors = [act for act in ordered if act.axes.stakes == "major"]
+    _add(sorted(majors, key=act_score, reverse=True))
+
+    _add(ordered[:initial_count])
+    _add(ordered[-final_count:])
+
+    if len(selected) < limit:
+        remaining = [act for act in ordered if act.id not in selected]
+        remaining.sort(key=act_score, reverse=True)
+        for act in remaining:
+            selected[act.id] = act
+            if len(selected) >= limit:
+                break
+
+    return sorted(selected.values(), key=lambda a: a.segment)
 
 
-def _packs_for_pair(bag: DyadBag) -> tuple[list[str], list[str], dict, dict]:
-    dossier = _sample_dossier(bag.acts_rep)
-    dossier_lines = [json.dumps(a.model_dump(), ensure_ascii=False) for a in dossier]
-    tom_lines = [json.dumps(t.model_dump(), ensure_ascii=False) for t in bag.toms[-6:]]
+def _select_toms_for_dossier(
+    toms: list[ToMClue],
+    *,
+    limit: int = 20,
+    initial_count: int = 5,
+    final_count: int = 5,
+) -> list[ToMClue]:
+    if not toms:
+        return []
 
-    causal_edges = []
-    for act in bag.acts_all:
-        for ref in act.referenced_segments:
-            causal_edges.append(
-                {
-                    "src_segment": act.segment,
-                    "dst_segment": int(ref),
-                    "via": [act.id],
-                }
-            )
-    causal_json = {"edges": causal_edges[:50]}
+    ordered = sorted(toms, key=lambda t: t.segment)
+    selected: dict[str, ToMClue] = {}
 
+    def _add(group: Iterable[ToMClue]) -> None:
+        for tom in group:
+            if tom.id not in selected:
+                selected[tom.id] = tom
+
+    intends = [tom for tom in ordered if tom.kind == "IntendsTo"]
+    _add(intends)
+
+    _add(ordered[:initial_count])
+    _add(ordered[-final_count:])
+
+    if len(selected) < limit:
+        priority = {"DesiresFor": 3, "FeelsTowards": 2, "BelievesAbout": 1}
+        remaining = [tom for tom in ordered if tom.id not in selected]
+        remaining.sort(
+            key=lambda t: (-priority.get(t.kind, 0), t.segment),
+        )
+        for tom in remaining:
+            selected[tom.id] = tom
+            if len(selected) >= limit:
+                break
+
+    return sorted(selected.values(), key=lambda t: t.segment)
+
+
+def _compute_stats(acts: list[ActClue]) -> dict[str, int | float]:
     from collections import Counter
 
-    valence = Counter(act.valence for act in bag.acts_all)
-    sal = Counter(act.axes.salience for act in bag.acts_all)
-    stakes = Counter(act.axes.stakes for act in bag.acts_all)
-    durability = Counter(act.axes.durability for act in bag.acts_all)
-    coerced = sum(1 for act in bag.acts_all if act.axes.volition == "coerced")
+    valence = Counter(act.valence for act in acts)
+    stakes = Counter(act.axes.stakes for act in acts)
 
-    stats = {
-        "acts_count": len(bag.acts_all),
-        "valence_freq": dict(valence),
-        "salience_freq": dict(sal),
-        "stakes_freq": dict(stakes),
-        "durability_freq": dict(durability),
-        "coerced_ratio": (coerced / len(bag.acts_all)) if bag.acts_all else 0.0,
+    return {
+        "total_acts": len(acts),
+        "valence_positive": valence.get("positive", 0),
+        "valence_negative": valence.get("negative", 0),
+        "stakes_major": stakes.get("major", 0),
+        "stakes_moderate": stakes.get("moderate", 0),
+        "stakes_minor": stakes.get("minor", 0),
     }
 
-    return dossier_lines, tom_lines, causal_json, stats
+
+def compute_initial_state(
+    acts: list[ActClue], window_segments: int = 10
+) -> dict[str, str | int]:
+    if not acts:
+        return {
+            "valence": "unknown",
+            "durability": "unknown",
+            "based_on": "0 acts (no data)",
+        }
+
+    ordered = sorted(acts, key=lambda a: a.segment)
+    unique_segments: list[int] = []
+    for act in ordered:
+        if not unique_segments or unique_segments[-1] != act.segment:
+            unique_segments.append(act.segment)
+        if len(unique_segments) >= window_segments:
+            break
+
+    cutoff = unique_segments[-1] if unique_segments else ordered[-1].segment
+    window = [act for act in ordered if act.segment <= cutoff]
+
+    pos = sum(1 for act in window if act.valence == "positive")
+    neg = sum(1 for act in window if act.valence == "negative")
+
+    if pos > neg * 2:
+        valence = "positive"
+    elif neg > pos * 2:
+        valence = "negative"
+    else:
+        valence = "mixed"
+
+    has_persistent = any(act.axes.durability == "persistent" for act in window)
+    durability = "persistent" if has_persistent else "temporary"
+
+    return {
+        "valence": valence,
+        "durability": durability,
+        "based_on": f"{len(window)} acts in segments {ordered[0].segment}-{cutoff}",
+    }
+
+
+def _build_payload(bag: DyadBag) -> str:
+    selected_acts = _select_acts_for_dossier(bag.acts)
+    selected_toms = _select_toms_for_dossier(bag.toms)
+    stats = _compute_stats(bag.acts)
+    initial_state = compute_initial_state(bag.acts)
+
+    payload = {
+        "pair": {"characters": [bag.pair[0], bag.pair[1]]},
+        "acts": [act.model_dump() for act in selected_acts],
+        "toms": [tom.model_dump() for tom in selected_toms],
+        "statistics": stats,
+        "computed_initial_state": initial_state,
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
 class DyadSynthesizer(Processor):
@@ -171,7 +250,7 @@ class DyadSynthesizer(Processor):
         - batch_size: Optional override for batch submission size (default 10).
 
     Input: ActClue, ToMClue
-    Output: SynthesisResult with representative acts, directed acts, and adjudicated dyads.
+    Output: SynthesisResult containing adjudicated dyads.
     """
 
     def __init__(
@@ -194,9 +273,7 @@ class DyadSynthesizer(Processor):
         acts = result.get_clues(ActClue)
         toms = result.get_clues(ToMClue)
 
-        acts_representative = bundle_same_segment(acts)
-        acts_directed = explode_directed(acts)
-        bags = build_bags(toms, acts_representative, acts_directed)
+        bags = build_bags(toms, acts)
         adjudication = self._run_batch(bags.items())
         dyads = []
         for pair, payload in adjudication.items():
@@ -206,11 +283,7 @@ class DyadSynthesizer(Processor):
                     char1=sorted_pair[0], char2=sorted_pair[1], adjudication=payload
                 )
             )
-        return SynthesisResult(
-            acts_representative=acts_representative,
-            acts_directed=acts_directed,
-            dyads=dyads,
-        )
+        return SynthesisResult(dyads=dyads)
 
     @property
     def result_type(self) -> Type[SynthesisResult]:
@@ -294,19 +367,13 @@ class DyadSynthesizer(Processor):
         requests: list[types.InlinedRequestDict] = []
         order: list[tuple[str, str]] = []
         for pair, bag in items:
-            dossier, toms, causal, stats = _packs_for_pair(bag)
+            payload_json = _build_payload(bag)
             requests.append(
                 types.InlinedRequestDict(
                     contents=[
                         {
                             "role": "user",
-                            "parts": [
-                                {
-                                    "text": _dyad_user_payload(
-                                        dossier, toms, causal, stats
-                                    )
-                                }
-                            ],
+                            "parts": [{"text": payload_json}],
                         }
                     ],
                     config=types.GenerateContentConfigDict(
