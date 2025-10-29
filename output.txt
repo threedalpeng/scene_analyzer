@@ -1,0 +1,380 @@
+====================================================================================================
+                     RELATIONSHIP ANALYSIS REPORT: Ernesto de la Cruz ↔ Héctor                      
+====================================================================================================
+
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                        EXECUTIVE SUMMARY                                         │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+Relationship Trajectory:
+  Initial State: mixed / persistent "Strained but historically close collaborators" (from turning analysis)
+  #1 Segment 67 → Reversal
+  Final State: negative "Mortal enemies due to murder and theft of legacy"
+
+Key Statistics:
+  • Total Interactions: 17 acts, 22 ToMs across segments 36-80
+  • Turning Points: 2
+  • Valence Shift: 60.0% → 0.0% positive
+  • Critical Segment: 67
+
+Narrative Arc:
+  36-65: Early context from ToM clues and initial acts
+  Segment(s) 67, 69: Turning point sequence
+  78-80: Relationship aftermath and final state
+
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                TURNING POINTS: Detailed Analysis                                 │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+#1 SEGMENT 67 — Reversal
+══════════════════════════════════════════════════════════════════════════════════
+  Summary:
+    Héctor realizes Ernesto de la Cruz poisoned him, instantly shattering any
+    remaining bonds of friendship and exposing de la Cruz's true, murderous intent.
+
+  ┌─ State Transition ───────────────────────────────────────────────────────────┐
+  │ BEFORE:    mixed / persistent  Strained but historically close collaborators.│
+  │ AFTER : negative / persistent  Mortal enemies                                │
+  └──────────────────────────────────────────────────────────────────────────────┘
+
+  Representative Action [act_067_0001]:
+    ⚔ Ernesto de la Cruz → Héctor: poisons (valence=negative)
+    Stakes=major, Durability=persistent
+    Evidence: "You... POISONED me."
+
+  Psychological Causes (ToM):
+    • [tom_067_0001] BelievesAbout — Héctor about Ernesto de la Cruz
+      Claim: "DE LA CRUZ poisoned HÉCTOR."
+      Evidence: "You... POISONED me."
+
+  Pattern: Revelation of betrayal
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+#2 SEGMENT 69 — Dissolution
+════════════════════════════════════════════════════════════════════════════════════════════════════
+  Summary:
+    After being confronted about the poisoning, De la Cruz orders Héctor to be "taken care of," confirming his intent to eliminate Héctor and cementing their roles as mortal enemies.
+
+  ┌─ State Transition ────────────────────────────────────────────────────────────────┐
+  │ BEFORE: negative / persistent  Mortal enemies (betrayal revealed)    │
+  │ AFTER : negative / persistent  Actively hostile mortal enemies       │
+  └────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+  Representative Action [act_069_0005]:
+    ⚔ Ernesto de la Cruz → Héctor: orders harm_or_removal (valence=negative)
+    Stakes=major, Salience=high, Durability=persistent
+    Evidence: "Have him taken care of."
+
+  Psychological Causes (ToM):
+    • [tom_069_0005] IntendsTo — Ernesto de la Cruz about Héctor
+      Claim: "de la Cruz intends to have Héctor removed or harmed."
+      Evidence: "Have him taken care of."
+
+  Pattern: Actively seeking the other's demise
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                 SELECTED CLUES (Provided to LLM)                                 │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+Selection Strategy:
+  Acts:  major stakes + first 2 segments + last 2 segments + score-ranked fill (max 30)
+  ToMs:  IntendsTo + act segments ±1 + first 3 ToM segments + last 2 segments + priority (max 20)
+
+ACT CLUES (17 selected out of 17 total):
+  ✓ Segment 065 [3 acts] - early segment
+    • act_065_0001: obstructs (negative, stakes=moderate)
+    • act_065_0002: resists (negative, stakes=moderate)
+    • act_065_0003: offers_drink (positive, stakes=minor) [• SUPPORTING]
+
+  ✓ Segment 066 [2 acts] - early segment
+    • act_066_0001: helps (positive, stakes=minor) [• SUPPORTING]
+    • act_066_0002: provides_assistance (positive, stakes=minor) [• SUPPORTING]
+
+  ⭐ Segment 067 [1 act] - MAJOR stakes
+    • act_067_0001: poisons (negative, stakes=major) [⭐ TURNING]
+
+  ⭐ Segment 069 [4 acts] - MAJOR stakes
+    • act_069_0001: physical attack (negative, stakes=major) [• SUPPORTING]
+    • act_069_0002: physical fight (negative, stakes=major) [• SUPPORTING]
+    • act_069_0003: physical fight (negative, stakes=major) [• SUPPORTING]
+    • act_069_0005: orders harm_or_removal (negative, stakes=major) [⭐ TURNING]
+
+  ⭐ Segment 076 [1 act] - MAJOR stakes
+    • act_076_0013: murders (negative, stakes=major)
+
+  ⭐ Segment 078 [1 act] - MAJOR stakes
+    • act_078_0007: flees (negative, stakes=major)
+
+  ✓ Segment 079 [1 act] - late segment
+    • act_079_0015: pursues (negative, stakes=moderate)
+
+  ⭐ Segment 080 [4 acts] - late segment, MAJOR stakes
+    • act_080_0014: commands (negative, stakes=moderate)
+    • act_080_0019: pursues (negative, stakes=moderate)
+    • act_080_0023: murdered (negative, stakes=major)
+    • act_080_0024: steals_intellectual_property (negative, stakes=major)
+
+THEORY-OF-MIND CLUES (22 selected out of 22 total):
+  ✓ Segment 036 [1 ToM] - early ToM segment
+    • tom_036_0007: BelievesAbout — Héctor about Ernesto de la Cruz [• SUPPORTING]
+
+  ✓ Segment 040 [1 ToM] - early ToM segment
+    • tom_040_0005: BelievesAbout — Héctor about Ernesto de la Cruz [• SUPPORTING]
+
+  ⚡ Segment 065 [8 ToMs] - same segment as selected act, early ToM segment
+    • tom_065_0001: BelievesAbout — Héctor about Ernesto de la Cruz
+    • tom_065_0002: BelievesAbout — Héctor about Ernesto de la Cruz
+    • tom_065_0003: BelievesAbout — Ernesto de la Cruz about Héctor [• SUPPORTING]
+    • tom_065_0005: BelievesAbout — Héctor about Ernesto de la Cruz [• SUPPORTING]
+    • tom_065_0006: FeelsTowards — Ernesto de la Cruz about Héctor [• SUPPORTING]
+    • tom_065_0007: FeelsTowards — Ernesto de la Cruz about Héctor [• SUPPORTING]
+    • tom_065_0008: IntendsTo — Ernesto de la Cruz about Héctor
+    • tom_065_0009: DesiresFor — Ernesto de la Cruz about Héctor [• SUPPORTING]
+
+  ⚡ Segment 066 [1 ToM] - same segment as selected act
+    • tom_066_0001: BelievesAbout — Ernesto de la Cruz about Héctor
+
+  ⚡ Segment 067 [1 ToM] - same segment as selected act
+    • tom_067_0001: BelievesAbout — Héctor about Ernesto de la Cruz [• SUPPORTING]
+
+  ⚡ Segment 069 [6 ToMs] - same segment as selected act
+    • tom_069_0001: BelievesAbout — Héctor about Ernesto de la Cruz [• SUPPORTING]
+    • tom_069_0002: BelievesAbout — Héctor about Ernesto de la Cruz [• SUPPORTING]
+    • tom_069_0003: FeelsTowards — Héctor about Ernesto de la Cruz [• SUPPORTING]
+    • tom_069_0004: BelievesAbout — Ernesto de la Cruz about Héctor [• SUPPORTING]
+    • tom_069_0005: IntendsTo — Ernesto de la Cruz about Héctor [• SUPPORTING]
+    • tom_069_0012: BelievesAbout — Ernesto de la Cruz about Héctor
+
+  ⚡ Segment 078 [2 ToMs] - same segment as selected act, late ToM segment
+    • tom_078_0009: BelievesAbout — Ernesto de la Cruz about Héctor
+    • tom_078_0014: BelievesAbout — Ernesto de la Cruz about Héctor
+
+  ⚡ Segment 080 [2 ToMs] - same segment as selected act, late ToM segment
+    • tom_080_0005: DesiresFor — Héctor about Ernesto de la Cruz
+    • tom_080_0011: IntendsTo — Ernesto de la Cruz about Héctor
+
+Selection Coverage:
+  • Acts: 17/17 (100.0%)
+  • ToMs: 22/22 (100.0%)
+  • Segments covered: 36, 40, 65, 66, 67, 69, 76, 78, 79, 80
+
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                      STATISTICS & PATTERNS                                       │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+Act Analysis:
+  Total: 17 acts
+  Valence Distribution:
+    • Positive: 3 (17.6%)
+    • Negative: 14 (82.4%)
+
+  Stakes Distribution:
+    • Major: 9 (52.9%)
+    • Moderate: 5 (29.4%)
+    • Minor: 3 (17.6%)
+
+  Temporal Density: 1.06 acts/segment (span 65-80)
+
+Theory-of-Mind Analysis:
+  Total: 22 ToMs
+    • BelievesAbout: 14 (63.6%)
+    • FeelsTowards: 3 (13.6%)
+    • IntendsTo: 3 (13.6%)
+    • DesiresFor: 2 (9.1%)
+  ToM/Act Ratio: 1.29
+
+Relationship Dynamics:
+  • Segment 67: Reversal (mixed → negative)
+  • Segment 69: Dissolution (negative → negative)
+
+Key Insights:
+  ⚠ Major stakes concentration (9/17 acts)
+  ⚠ Early relationship context inferred from ToM clues only
+
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                               FULL TIMELINE: All Clues (Reference)                               │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+Note: Clues marked with [SELECTED] were provided to the LLM. ⭐/• denote turning/supporting roles.
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+SEGMENT 036
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  ToM [tom_036_0007] [SELECTED] [• SUPPORTING]
+    [BelievesAbout] Héctor about Ernesto de la Cruz: "Héctor believes he and de la Cruz "go way back"."
+    Evidence: "He and I go way back!"
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+SEGMENT 040
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  ToM [tom_040_0005] [SELECTED] [• SUPPORTING]
+    [BelievesAbout] Héctor about Ernesto de la Cruz: "Héctor believes de la Cruz is a tough guy to get to."
+    Evidence: "One hiccup: de la Cruz is a tough guy to get to."
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+SEGMENT 065
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  ACT [act_065_0001] [SELECTED]
+    [negative] Ernesto de la Cruz → Héctor: obstructs
+    Stakes=moderate, Salience=medium, Durability=momentary
+    Evidence: "De la Cruz grabs young Héctor's suitcase"
+  ACT [act_065_0002] [SELECTED]
+    [negative] Héctor → Ernesto de la Cruz: resists
+    Stakes=moderate, Salience=medium, Durability=momentary
+    Evidence: "Héctor pulls away."
+  ACT [act_065_0003] [SELECTED] [• SUPPORTING]
+    [positive] Ernesto de la Cruz → Héctor: offers_drink
+    Stakes=minor, Salience=medium, Durability=momentary
+    Evidence: "He gives one to Héctor."
+  ToM [tom_065_0001] [SELECTED]
+    [BelievesAbout] Héctor about Ernesto de la Cruz: "The dream they pursued was De la Cruz's."
+    Evidence: "This was your dream."
+  ToM [tom_065_0002] [SELECTED]
+    [BelievesAbout] Héctor about Ernesto de la Cruz: "De la Cruz will manage (without him)."
+    Evidence: "You'll manage."
+  ToM [tom_065_0003] [SELECTED] [• SUPPORTING]
+    [BelievesAbout] Ernesto de la Cruz about Héctor: "He cannot succeed without Héctor's songs."
+    Evidence: "I can't do this without your songs, Héctor--"
+  ToM [tom_065_0005] [SELECTED] [• SUPPORTING]
+    [BelievesAbout] Héctor about Ernesto de la Cruz: "His decision to leave is final."
+    Evidence: "my mind is made up."
+  ToM [tom_065_0006] [SELECTED] [• SUPPORTING]
+    [FeelsTowards] Ernesto de la Cruz about Héctor: "De la Cruz feels angry (about Héctor's decision)."
+    Evidence: "De la Cruz looks angry. For a moment his face darkens."
+  ToM [tom_065_0007] [SELECTED] [• SUPPORTING]
+    [FeelsTowards] Ernesto de la Cruz about Héctor: "He could never hate Héctor."
+    Evidence: "Oh, I could never hate you."
+  ToM [tom_065_0008] [SELECTED]
+    [IntendsTo] Ernesto de la Cruz about Héctor: "He will send Héctor off with a toast."
+    Evidence: "If you must go, then I'm... I'm sending you off with a toast!"
+  ToM [tom_065_0009] [SELECTED] [• SUPPORTING]
+    [DesiresFor] Ernesto de la Cruz about Héctor: "He would do anything for Héctor."
+    Evidence: "I would move Heaven and Earth for you, mi amigo."
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+SEGMENT 066
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  ACT [act_066_0001] [SELECTED] [• SUPPORTING]
+    [positive] Ernesto de la Cruz → Héctor: helps
+    Stakes=minor, Salience=medium, Durability=momentary
+    Evidence: "de la Cruz steadies him"
+  ACT [act_066_0002] [SELECTED] [• SUPPORTING]
+    [positive] Ernesto de la Cruz → Héctor: provides_assistance
+    Stakes=minor, Salience=low, Durability=temporary
+    Evidence: "takes his guitar case"
+  ToM [tom_066_0001] [SELECTED]
+    [BelievesAbout] Ernesto de la Cruz about Héctor: "He believes Héctor's pain might have been caused by chorizo."
+    Evidence: "Perhaps it was that chorizo my friend..."
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+SEGMENT 067
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  ACT [act_067_0001] [SELECTED] [⭐ TURNING]
+    [negative] Ernesto de la Cruz → Héctor: poisons
+    Stakes=major, Salience=high, Durability=persistent
+    Evidence: "You... POISONED me."
+  ToM [tom_067_0001] [SELECTED] [• SUPPORTING]
+    [BelievesAbout] Héctor about Ernesto de la Cruz: "DE LA CRUZ poisoned HÉCTOR."
+    Evidence: "You... POISONED me."
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+SEGMENT 069
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  ACT [act_069_0001] [SELECTED] [• SUPPORTING]
+    [negative] Héctor → Ernesto de la Cruz: physical attack
+    Stakes=major, Salience=high, Durability=momentary
+    Evidence: "Then he bounds at de la Cruz, tackling him to the ground."
+  ACT [act_069_0002] [SELECTED] [• SUPPORTING]
+    [negative] Héctor → Ernesto de la Cruz: physical fight
+    Stakes=major, Salience=high, Durability=momentary
+    Evidence: "Héctor and Ernesto scuffle on the floor."
+  ACT [act_069_0003] [SELECTED] [• SUPPORTING]
+    [negative] Ernesto de la Cruz → Héctor: physical fight
+    Stakes=major, Salience=high, Durability=momentary
+    Evidence: "Héctor and Ernesto scuffle on the floor."
+  ACT [act_069_0005] [SELECTED] [⭐ TURNING]
+    [negative] Ernesto de la Cruz → Héctor: orders harm_or_removal
+    Stakes=major, Salience=high, Durability=persistent
+    Evidence: "Have him taken care of."
+  ToM [tom_069_0001] [SELECTED] [• SUPPORTING]
+    [BelievesAbout] Héctor about Ernesto de la Cruz: "Héctor believes de la Cruz has done something terrible."
+    Evidence: "How could you?!"
+  ToM [tom_069_0002] [SELECTED] [• SUPPORTING]
+    [BelievesAbout] Héctor about Ernesto de la Cruz: "Héctor believes de la Cruz took everything away from him."
+    Evidence: "You took everything away from me!"
+  ToM [tom_069_0003] [SELECTED] [• SUPPORTING]
+    [FeelsTowards] Héctor about Ernesto de la Cruz: "Héctor feels intense contempt/anger towards de la Cruz."
+    Evidence: "You rat!"
+  ToM [tom_069_0004] [SELECTED] [• SUPPORTING]
+    [BelievesAbout] Ernesto de la Cruz about Héctor: "de la Cruz believes Héctor is mentally unstable."
+    Evidence: "He's not well."
+  ToM [tom_069_0005] [SELECTED] [• SUPPORTING]
+    [IntendsTo] Ernesto de la Cruz about Héctor: "de la Cruz intends to have Héctor removed or harmed."
+    Evidence: "Have him taken care of."
+  ToM [tom_069_0012] [SELECTED]
+    [BelievesAbout] Ernesto de la Cruz about Héctor: "de la Cruz claims Héctor was his best friend."
+    Evidence: "And Héctor was my best friend."
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+SEGMENT 076
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  ACT [act_076_0013] [SELECTED]
+    [negative] Ernesto de la Cruz → Héctor: murders
+    Stakes=major, Salience=high, Durability=persistent
+    Evidence: "de la Cruz murdered him!"
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+SEGMENT 078
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  ACT [act_078_0007] [SELECTED]
+    [negative] Ernesto de la Cruz → Héctor: flees
+    Stakes=major, Salience=high, Durability=momentary
+    Evidence: "Outnumbered, de la Cruz turns and runs."
+  ToM [tom_078_0009] [SELECTED]
+    [BelievesAbout] Ernesto de la Cruz about Héctor: "Héctor should not be present/alive."
+    Evidence: "DE LA CRUZ: Héctor?! How did you--"
+  ToM [tom_078_0014] [SELECTED]
+    [BelievesAbout] Ernesto de la Cruz about Héctor: "Miguel, Héctor, and Mamá Imelda are connected/related."
+    Evidence: "De la Cruz sees the three of them and puts the pieces together."
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+SEGMENT 079
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  ACT [act_079_0015] [SELECTED]
+    [negative] Héctor → Ernesto de la Cruz: pursues
+    Stakes=moderate, Salience=medium, Durability=momentary
+    Evidence: "Miguel, Héctor, Tía Victoria, and Tía Rosita hurry up the stairs after de la Cruz."
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+SEGMENT 080
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  ACT [act_080_0014] [SELECTED]
+    [negative] Ernesto de la Cruz → Héctor: commands
+    Stakes=moderate, Salience=medium, Durability=momentary
+    Evidence: "DE LA CRUZ: Stay back! Stay back. All of you!"
+  ACT [act_080_0019] [SELECTED]
+    [negative] Héctor → Ernesto de la Cruz: pursues
+    Stakes=moderate, Salience=medium, Durability=temporary
+    Evidence: "Héctor struggles but continues pursuing de la Cruz."
+  ACT [act_080_0023] [SELECTED]
+    [negative] Ernesto de la Cruz → Héctor: murdered
+    Stakes=major, Salience=high, Durability=persistent
+    Evidence: "you're just the guy who murdered him and stole his songs!"
+  ACT [act_080_0024] [SELECTED]
+    [negative] Ernesto de la Cruz → Héctor: steals_intellectual_property
+    Stakes=major, Salience=high, Durability=persistent
+    Evidence: "you're just the guy who murdered him and stole his songs!"
+  ToM [tom_080_0005] [SELECTED]
+    [DesiresFor] Héctor about Ernesto de la Cruz: "de la Cruz to stop and leave Miguel alone."
+    Evidence: "HÉCTOR: Ernesto, stop! Leave the boy alone!"
+  ToM [tom_080_0011] [SELECTED]
+    [IntendsTo] Ernesto de la Cruz about Héctor: "prevent Héctor's memory from being kept alive."
+    Evidence: "To keep your memory alive? (beat) No."
+────────────────────────────────────────────────────────────────────────────────────────────────────
+End of Timeline
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+====================================================================================================
