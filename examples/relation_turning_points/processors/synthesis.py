@@ -5,16 +5,16 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Iterable, Type
 
+from clues.act import ActClue, act_score, bundle_same_segment, explode_directed
+from clues.tom import ToMClue
 from google import genai
 from google.genai import types
 from pydantic import BaseModel
+from schema import LLMAdjudication
 
-from clues.act import ActClue, act_score, bundle_same_segment, explode_directed
-from clues.tom import ToMClue
 from framework.core.processor import Processor
 from framework.core.result import PipelineResult
 from framework.utils import log_status, parse_model
-from schema import LLMAdjudication
 
 if TYPE_CHECKING:
     from framework.core.pipeline import PipelineConfig
@@ -23,10 +23,8 @@ if TYPE_CHECKING:
 DYAD_SYSTEM_PROMPT = """
 You adjudicate relationship state across segments for a dyad (character pair).
 Use ONLY the provided clue packs and return strict JSON per schema.
+You can update the relation states using evidences if they don't match.
 
-{body}
-""".strip().format(
-    body="""
 CORE CONCEPTS:
 
 Turning: A qualitative change in relationship state.
@@ -54,7 +52,6 @@ ID Rules:
 
 Output JSON must match the provided schema exactly.
 """
-)
 
 
 def _dyad_user_payload(
@@ -196,6 +193,7 @@ class DyadSynthesizer(Processor):
     def __call__(self, result: PipelineResult) -> SynthesisResult:
         acts = result.get_clues(ActClue)
         toms = result.get_clues(ToMClue)
+
         acts_representative = bundle_same_segment(acts)
         acts_directed = explode_directed(acts)
         bags = build_bags(toms, acts_representative, acts_directed)

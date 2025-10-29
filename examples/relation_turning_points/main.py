@@ -4,13 +4,12 @@ from pathlib import Path
 from typing import Any
 
 from clues.act import ActExtractor
-from clues.temporal import TemporalExtractor
 from clues.tom import ToMExtractor
-from framework.core import Pipeline, PipelineConfig
 from processors.aliasing import AliasResolver
 from processors.result_saver import ResultSaver
 from processors.synthesis import DyadSynthesizer
-from processors.temporal import TemporalReconstructor
+
+from framework.core import Pipeline, PipelineConfig
 from framework.utils import ensure_dir, log_status, make_client
 
 
@@ -69,9 +68,8 @@ def main() -> None:
     config = PipelineConfig(client=client, batch_size=args.batch)
     pipeline = (
         Pipeline(config)
-        .extract([ActExtractor, ToMExtractor, TemporalExtractor])
+        .extract([ActExtractor, ToMExtractor])
         .process(AliasResolver())
-        .process(TemporalReconstructor())
         .process(DyadSynthesizer())
         .process(ResultSaver(args.out))
     )

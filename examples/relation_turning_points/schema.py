@@ -76,12 +76,3 @@ class LLMAdjudication(BaseModel):
     turning_timeline: list[TurningEntry]
     final_relation: FinalRelation
     log: list[str] = Field(default_factory=list)
-
-
-class AliasGroup(BaseModel):
-    canonical: str
-    aliases: list[str]
-
-
-class AliasGroups(BaseModel):
-    groups: list[AliasGroup]

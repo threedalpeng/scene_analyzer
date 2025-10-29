@@ -4,25 +4,19 @@ import json
 from collections import defaultdict
 from typing import TYPE_CHECKING, Type
 
-from google import genai
-from google.genai import types
-
 from clues.act import ActClue
 from clues.entity import EntityClue
 from clues.tom import ToMClue
+from google import genai
+from google.genai import types
+from pydantic import BaseModel
+
 from framework.core.processor import Processor
 from framework.core.result import PipelineResult
-from pydantic import BaseModel
 from framework.utils import norm_pair, parse_model
-from schema import AliasGroup, AliasGroups
 
 if TYPE_CHECKING:
     from framework.core.pipeline import PipelineConfig
-
-
-class AliasingResult(BaseModel):
-    alias_groups: AliasGroups
-    alias_map: dict[str, str]
 
 
 class AliasResolver(Processor):
@@ -58,6 +52,21 @@ class AliasResolver(Processor):
 
         final_groups = AliasGroups(groups=[*base_groups.groups, *llm_groups.groups])
         alias_map = self._build_alias_map(final_groups)
+
+        acts = result.get_clues(ActClue)
+        toms = result.get_clues(ToMClue)
+
+        for act in acts:
+            act.actors = [alias_name(name, alias_map) for name in act.actors]
+            act.targets = [alias_name(name, alias_map) for name in act.targets]
+            act.pair = alias_pair(act.pair, alias_map)
+
+        for tom in toms:
+            tom.pair = alias_pair(tom.pair, alias_map)
+
+        result.set_clues(ActClue, acts)
+        result.set_clues(ToMClue, toms)
+
         return AliasingResult(alias_groups=final_groups, alias_map=alias_map)
 
     @staticmethod
@@ -183,6 +192,20 @@ def alias_name(n: str, amap: dict[str, str]) -> str:
 def alias_pair(p: tuple[str, str], amap: dict[str, str]) -> tuple[str, str]:
     """Apply alias map to a pair."""
     return norm_pair(alias_name(p[0], amap), alias_name(p[1], amap))
+
+
+class AliasGroup(BaseModel):
+    canonical: str
+    aliases: list[str]
+
+
+class AliasGroups(BaseModel):
+    groups: list[AliasGroup]
+
+
+class AliasingResult(BaseModel):
+    alias_groups: AliasGroups
+    alias_map: dict[str, str]
 
 
 __all__ = ["AliasResolver", "AliasingResult", "alias_name", "alias_pair"]
