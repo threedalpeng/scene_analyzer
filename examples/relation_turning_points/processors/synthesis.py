@@ -298,6 +298,13 @@ def _select_toms_for_dossier(
             if tom.id not in selected:
                 selected[tom.id] = tom
 
+    all_segments = sorted({t.segment for t in ordered})
+
+    if all_segments:
+        early_segs = set(all_segments[:3])
+        early_toms = [t for t in ordered if t.segment in early_segs]
+        _add(early_toms)
+
     intends = [tom for tom in ordered if tom.kind == "IntendsTo"]
     _add(intends)
 
@@ -318,16 +325,10 @@ def _select_toms_for_dossier(
         relevant_toms.sort(key=lambda t: (-priority.get(t.kind, 0), t.segment))
         _add(relevant_toms)
 
-    if len(selected) < limit:
-        all_segments = sorted(set(t.segment for t in ordered))
-        if all_segments:
-            early_segs = set(all_segments[:3])
-            early_toms = [t for t in ordered if t.segment in early_segs]
-            _add(early_toms)
-
-            late_segs = set(all_segments[-2:])
-            late_toms = [t for t in ordered if t.segment in late_segs]
-            _add(late_toms)
+    if len(selected) < limit and all_segments:
+        late_segs = set(all_segments[-2:])
+        late_toms = [t for t in ordered if t.segment in late_segs]
+        _add(late_toms)
 
     if len(selected) < limit:
         priority = {
