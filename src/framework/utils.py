@@ -1,12 +1,12 @@
 import json
+import os
 from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Type, TypeVar
 
+from google import genai
 from pydantic import BaseModel
-
-from schema import ActClue
 
 
 def ensure_dir(p: Path) -> None:
@@ -33,19 +33,6 @@ def norm_pair(a: str, b: str) -> tuple[str, str]:
     return a, b
 
 
-STAKE_RANK = {"major": 3, "moderate": 2, "minor": 1}
-SALIENCE_RANK = {"high": 3, "medium": 2, "low": 1}
-DUR_RANK = {"persistent": 3, "temporary": 2, "momentary": 1}
-
-
-def act_score(a: ActClue) -> int:
-    return (
-        100 * STAKE_RANK.get(a.axes.stakes, 0)
-        + 10 * SALIENCE_RANK.get(a.axes.salience, 0)
-        + DUR_RANK.get(a.axes.durability, 0)
-    )
-
-
 T = TypeVar("T", bound=BaseModel)
 
 
@@ -60,3 +47,13 @@ def parse_model(model: Type[T], payload: str | dict[str, Any] | BaseModel) -> T:
     else:
         data = payload
     return model.model_validate(data)
+
+
+def make_client() -> genai.Client:
+    api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise RuntimeError(
+            "Set GOOGLE_API_KEY (or GEMINI_API_KEY) in your environment."
+        )
+    client = genai.Client(api_key=api_key)
+    return client
